@@ -233,6 +233,7 @@ public actor EhAPI {
     // MARK: - 公开 API 方法
 
     /// 登录 (对应 Android signIn)
+    /// 先尝试 API 登录，如果被 Cloudflare 拦截 (403) 则抛出 cloudflare403 提示用户使用网页登录
     public func signIn(username: String, password: String) async throws -> String {
         guard let url = URL(string: EhURL.signInUrl) else {
             throw EhError.invalidUrl
@@ -252,6 +253,16 @@ public actor EhAPI {
         )
 
         let (data, response) = try await sanitizedData(for: request)
+
+        // 检测 Cloudflare 拦截: forums.e-hentai.org 可能会返回 403 + Cloudflare challenge
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 403 {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            if body.lowercased().contains("cloudflare") || body.lowercased().contains("cf-") ||
+               body.contains("Just a moment") || body.contains("challenge-platform") {
+                throw EhError.cloudflare403
+            }
+        }
+
         try checkResponse(response, data: data)
 
         let body = String(data: data, encoding: .utf8) ?? ""
@@ -1194,6 +1205,8 @@ public enum EhError: LocalizedError, Sendable {
     case noHathClient
     case cancelled
     case igneousWrong
+    /// Cloudflare 403 拦截 — 需要使用网页登录通过验证
+    case cloudflare403
     /// 画廊包含攻击性内容 (对应 Android OffensiveException)
     case offensive
     /// 画廊已删除 — pining for the fjords (对应 Android PiningException)
@@ -1209,6 +1222,7 @@ public enum EhError: LocalizedError, Sendable {
         case .sadPanda: return "Sad Panda — 请登录或检查 Cookie"
         case .kokomade: return "今回はここまで — 访问受限"
         case .httpError(let code, _): return "HTTP 错误 \(code)"
+        case .cloudflare403: return "Cloudflare 安全验证拦截 — 请使用下方「网页登录」通过验证后登录"
         case .parseError(let msg): return "解析失败: \(msg)"
         case .networkError(let msg): return "网络错误: \(msg)"
         case .imageLimitReached: return "509 — 图片配额已用尽"

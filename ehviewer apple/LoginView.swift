@@ -155,6 +155,12 @@ struct LoginView: View {
             case .parseFailure(let msg):
                 errorMessage = "解析失败: \(msg)"
             }
+        } catch let ehError as EhError {
+            if case .cloudflare403 = ehError {
+                errorMessage = ehError.localizedDescription
+            } else {
+                errorMessage = "网络错误: \(ehError.localizedDescription)"
+            }
         } catch {
             errorMessage = "网络错误: \(error.localizedDescription)"
         }
@@ -254,7 +260,8 @@ struct WebViewLogin: UIViewRepresentable {
         config.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
-        webView.customUserAgent = EhRequestBuilder.userAgent
+        // 使用 iOS Safari 原生 UA — Cloudflare Turnstile 需要真实浏览器 UA
+        // Windows Chrome UA 会被 Cloudflare 识别为异常 (iOS 设备发 Windows UA)
 
         // 加载论坛登录页面
         if let url = URL(string: EhURL.signInReferer) {
@@ -328,7 +335,7 @@ struct WebViewLogin: NSViewRepresentable {
         config.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
-        webView.customUserAgent = EhRequestBuilder.userAgent
+        // 使用 macOS Safari 原生 UA — Cloudflare Turnstile 需要真实浏览器 UA
 
         if let url = URL(string: EhURL.signInReferer) {
             webView.load(URLRequest(url: url))
