@@ -1,0 +1,259 @@
+//
+//  RootView.swift
+//  ehviewer apple
+//
+//  Root navigation: Warning → Security → SiteSelection → Login → Main app
+//
+
+import SwiftUI
+import EhSettings
+
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
+/// 根视图: 引导流程控制器
+/// 流程: 18+警告 → 安全认证 → 站点选择 → 登录检查 → 主界面
+struct RootView: View {
+    @State private var appState = AppState()
+    @State private var flowStep: OnboardingStep = .checking
+    
+    /// 后台进入时间戳，用于判断是否需要重新认证
+    @State private var backgroundTime: Date?
+    
+    /// 剪贴板画廊检测 (对齐 Android MainActivity.onResume 检测 EH 链接)
+    @State private var clipboardGallery: (gid: Int64, token: String)?
+    @State private var showClipboardAlert = false
+    @State private var lastClipboardContent: String?
+    
+    enum OnboardingStep {
+        case checking      // 检查状态中
+        case warning       // 18+ 警告
+        case security      // 安全认证
+        case selectSite    // 站点选择
+        case login         // 登录页
+        case main          // 主界面
+    }
+
+    var body: some View {
+        Group {
+            switch flowStep {
+            case .checking:
+                ProgressView("加载中...")
+                    .task { determineNextStep() }
+                
+            case .warning:
+                WarningView(
+                    onAccept: {
+                        AppSettings.shared.showWarning = false
+                        determineNextStep()
+                    },
+                    onReject: {
+                        // 退出应用
+                        #if os(macOS)
+                        NSApplication.shared.terminate(nil)
+                        #else
+                        exit(0)
+                        #endif
+                    }
+                )
+                
+            case .security:
+                SecurityView(onAuthenticated: {
+                    determineNextStep()
+                })
+                
+            case .selectSite:
+                SelectSiteView(onComplete: {
+                    determineNextStep()
+                })
+                
+            case .login:
+                LoginView()
+                    .environment(appState)
+                
+            case .main:
+                MainTabView()
+                    .environment(appState)
+            }
+        }
+        .animation(.easeInOut, value: flowStep)
+        .onChange(of: appState.isSignedIn) { _, isSignedIn in
+            if isSignedIn {
+                flowStep = .main
+            }
+        }
+        // 对齐 Android: 深色模式支持 (Settings.KEY_THEME)
+        // 0=跟随系统, 1=浅色, 2=深色
+        .preferredColorScheme(preferredColorScheme)
+        #if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            // 记录进入后台的时间
+            backgroundTime = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // 检查是否需要重新认证
+            checkSecurityOnResume()
+            // 检查剪贴板中的画廊链接 (对齐 Android MainActivity.onResume)
+            checkClipboardForGalleryUrl()
+        }
+        #elseif os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
+            backgroundTime = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            checkSecurityOnResume()
+            checkClipboardForGalleryUrl()
+        }
+        #endif
+        .alert("检测到画廊链接", isPresented: $showClipboardAlert) {
+            Button("打开") {
+                if let gallery = clipboardGallery {
+                    NotificationCenter.default.post(
+                        name: .openGalleryFromClipboard,
+                        object: nil,
+                        userInfo: ["gid": gallery.gid, "token": gallery.token]
+                    )
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let gallery = clipboardGallery {
+                Text("剪贴板含有画廊链接 (GID: \(gallery.gid))，是否打开？")
+            }
+        }
+    }
+    
+    // MARK: - 流程控制
+
+    /// 深色模式偏好 (对齐 Android: Settings.KEY_THEME)
+    private var preferredColorScheme: ColorScheme? {
+        switch AppSettings.shared.theme {
+        case 1: return .light
+        case 2: return .dark
+        default: return nil // 0: 跟随系统
+        }
+    }
+    
+    private func determineNextStep() {
+        let settings = AppSettings.shared
+        
+        // 1. 检查 18+ 警告
+        if settings.showWarning {
+            flowStep = .warning
+            return
+        }
+        
+        // 2. 检查安全认证 (仅在启用时)
+        if settings.enableSecurity && flowStep != .security {
+            // 首次进入或从后台恢复需要认证
+            if flowStep == .checking {
+                flowStep = .security
+                return
+            }
+        }
+        
+        // 3. 检查站点选择
+        if !settings.hasSelectedSite {
+            flowStep = .selectSite
+            return
+        }
+        
+        // 4. 检查登录状态
+        appState.checkLoginStatus()
+        
+        // 如果设置了跳过登录 (游客模式)，直接进入主界面
+        if appState.isSignedIn || AppSettings.shared.skipSignIn {
+            appState.isSignedIn = true  // 确保状态一致
+            flowStep = .main
+        } else {
+            flowStep = .login
+        }
+    }
+    
+    private func checkSecurityOnResume() {
+        guard AppSettings.shared.enableSecurity else { return }
+        guard flowStep == .main || flowStep == .login else { return }
+        
+        // 检查是否超过安全延迟时间
+        if let bgTime = backgroundTime {
+            let delaySeconds = AppSettings.shared.securityDelay
+            let elapsed = Date().timeIntervalSince(bgTime)
+            
+            if elapsed > Double(delaySeconds) {
+                flowStep = .security
+            }
+        }
+        
+        backgroundTime = nil
+    }
+
+    /// 检查剪贴板中的画廊链接 (对齐 Android MainActivity.checkClipboardUrl)
+    private func checkClipboardForGalleryUrl() {
+        guard flowStep == .main else { return }
+
+        #if os(iOS)
+        guard let content = UIPasteboard.general.string else { return }
+        #else
+        guard let content = NSPasteboard.general.string(forType: .string) else { return }
+        #endif
+
+        // 避免重复检测同一内容
+        guard content != lastClipboardContent else { return }
+        lastClipboardContent = content
+
+        // 匹配 EH 画廊 URL: https://e-hentai.org/g/GID/TOKEN/
+        let pattern = #"https?://(e-hentai|exhentai)\.org/g/(\d+)/([0-9a-f]{10})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+              match.numberOfRanges >= 4,
+              let gidRange = Range(match.range(at: 2), in: content),
+              let tokenRange = Range(match.range(at: 3), in: content),
+              let gid = Int64(content[gidRange]) else { return }
+
+        let token = String(content[tokenRange])
+        clipboardGallery = (gid: gid, token: token)
+        showClipboardAlert = true
+    }
+}
+
+// MARK: - 全局应用状态
+
+@Observable
+final class AppState {
+    var isSignedIn = false
+    var currentSite: SiteChoice = .eHentai
+
+    enum SiteChoice: Int {
+        case eHentai = 0
+        case exHentai = 1
+    }
+
+    func checkLoginStatus() {
+        // 检查 Cookie 是否存在
+        let cookies = HTTPCookieStorage.shared.cookies(for: URL(string: "https://e-hentai.org")!) ?? []
+        let hasMemberId = cookies.contains { $0.name == "ipb_member_id" }
+        let hasPassHash = cookies.contains { $0.name == "ipb_pass_hash" }
+        isSignedIn = hasMemberId && hasPassHash
+    }
+
+    func signOut() {
+        // 清除所有 EH 相关 Cookie
+        let domains = ["e-hentai.org", "exhentai.org", "forums.e-hentai.org"]
+        for domain in domains {
+            if let url = URL(string: "https://\(domain)") {
+                let cookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
+                for cookie in cookies {
+                    HTTPCookieStorage.shared.deleteCookie(cookie)
+                }
+            }
+        }
+        isSignedIn = false
+    }
+}
+
+#Preview {
+    RootView()
+}
