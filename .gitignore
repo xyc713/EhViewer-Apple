@@ -39,3 +39,14 @@ image/
 
 # Profiling data
 *.profraw
+
+# Migration/audit docs (internal)
+MIGRATION_PLAN.md
+EXECUTION_PLAN.md
+AUDIT_REPORT.md
+
+# Python scripts (internal tools)
+generate_icons.py
+
+# Default profiling data
+default.profraw
