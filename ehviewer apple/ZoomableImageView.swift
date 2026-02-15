@@ -38,6 +38,8 @@ struct ZoomableImageView: UIViewRepresentable {
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.bouncesZoom = true
         scrollView.bounces = true
+        scrollView.alwaysBounceHorizontal = false
+        scrollView.isDirectionalLockEnabled = true
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.scaleMode = scaleMode
         scrollView.startPosition = startPosition
@@ -56,11 +58,13 @@ struct ZoomableImageView: UIViewRepresentable {
         doubleTap.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTap)
 
-        // 单击手势
-        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
-        singleTap.numberOfTapsRequired = 1
-        singleTap.require(toFail: doubleTap)
-        scrollView.addGestureRecognizer(singleTap)
+        // 单击手势 — 仅在有回调时启用 (翻页模式由 tapZones 处理，避免边缘误触)
+        if onSingleTap != nil {
+            let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
+            singleTap.numberOfTapsRequired = 1
+            singleTap.require(toFail: doubleTap)
+            scrollView.addGestureRecognizer(singleTap)
+        }
 
         return scrollView
     }
@@ -113,6 +117,26 @@ struct ZoomableImageView: UIViewRepresentable {
             imageView
         }
 
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            // 始终钳制水平偏移，防止任何横向漂移/黑边 (对齐 Android GalleryView: 不允许水平越界)
+            let contentW = scrollView.contentSize.width
+            let boundsW = scrollView.bounds.width
+            guard contentW > 0 && boundsW > 0 else { return }
+
+            var targetX = scrollView.contentOffset.x
+            if contentW <= boundsW + 1 {
+                // 内容宽度 ≤ 视口: 锁定到居中位置，完全禁止水平移动
+                targetX = max(0, (contentW - boundsW) / 2)
+            } else {
+                // 内容宽度 > 视口 (放大时): 钳制到有效范围 [0, maxOffset]，防止过度滚动
+                let maxX = contentW - boundsW
+                targetX = min(max(0, targetX), maxX)
+            }
+            if abs(scrollView.contentOffset.x - targetX) > 0.1 {
+                scrollView.contentOffset.x = targetX
+            }
+        }
+
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             guard let imageView else { return }
             // 居中图片 (对齐 Android GalleryView.layout)
@@ -133,8 +157,11 @@ struct ZoomableImageView: UIViewRepresentable {
 
             imageView.frame = frameToCenter
 
-            // 在 1x 缩放时: 根据内容是否溢出决定是否启用滚动
+            // 缩放过程中也钳制水平偏移，防止缩放时横向漂移
             if let zoomScrollView = scrollView as? ZoomableScrollView {
+                zoomScrollView.clampHorizontalOffset()
+
+                // 在 1x 缩放时: 根据内容是否溢出决定是否启用滚动
                 let isZoomed = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
                 let contentOverflows = scrollView.contentSize.width > boundsSize.width + 1 ||
                                         scrollView.contentSize.height > boundsSize.height + 1
@@ -197,6 +224,9 @@ class ZoomableScrollView: UIScrollView {
         super.layoutSubviews()
         guard bounds.width > 0, bounds.height > 0 else { return }
 
+        // 每次布局都钳制水平偏移，阻止 UIScrollView bounce 导致的横向黑边
+        clampHorizontalOffset()
+
         // 仅在 1x (未缩放) 且 bounds 发生变化时重新计算
         guard zoomScale <= minimumZoomScale + 0.01 else {
             centerImageView()
@@ -252,6 +282,26 @@ class ZoomableScrollView: UIScrollView {
         f.origin.x = f.width < bounds.width ? (bounds.width - f.width) / 2 : 0
         f.origin.y = f.height < bounds.height ? (bounds.height - f.height) / 2 : 0
         imageView.frame = f
+    }
+
+    /// 钳制水平偏移到有效范围，防止横向漂移/黑边 (对齐 Android: 图片不允许水平越界)
+    func clampHorizontalOffset() {
+        let contentW = contentSize.width
+        let boundsW = bounds.width
+        guard contentW > 0 && boundsW > 0 else { return }
+
+        var targetX = contentOffset.x
+        if contentW <= boundsW + 1 {
+            // 内容宽度 ≤ 视口: 锁定居中
+            targetX = max(0, (contentW - boundsW) / 2)
+        } else {
+            // 放大时: 钳制到 [0, maxOffset]
+            let maxX = contentW - boundsW
+            targetX = min(max(0, targetX), maxX)
+        }
+        if abs(contentOffset.x - targetX) > 0.1 {
+            contentOffset.x = targetX
+        }
     }
 
     /// 设置初始滚动偏移 (对齐 Android ImageView startPosition 逻辑)

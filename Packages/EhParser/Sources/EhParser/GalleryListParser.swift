@@ -9,8 +9,8 @@ public enum GalleryListParser {
 
     // MARK: - 正则表达式 (从 Android 源码直接移植)
 
-    /// 评分样式正则: background-position:0px -num1px;opacity:num2
-    nonisolated(unsafe) private static let ratingPattern = /background-position:0px -(\d+)px;opacity:(\d+)/
+    /// 评分样式正则: background-position:Xpx Ypx (X 决定星数, Y 决定半星)
+    nonisolated(unsafe) private static let ratingPattern = /background-position:(-?\d+)px (-?\d+)px/
 
     /// 缩略图 URL 正则 (内联样式): url(...)
     nonisolated(unsafe) private static let thumbUrlPattern = /url\(([^)]+)\)/
@@ -391,16 +391,18 @@ public enum GalleryListParser {
     // MARK: - 评分解析
 
     /// 解析评分 (对应 Android 的评分计算算法)
-    /// background-position:0px -num1px → rate = 5 - num1/16
-    /// opacity:Xpx 且 num2==21 → rate -= 0.5
+    /// background-position:Xpx Ypx → rate = 5 + X/16 (X 为负值)
+    /// Y <= -21 时减 0.5 (半星)
     public static func parseRating(style: String) -> Float {
         guard let match = style.firstMatch(of: ratingPattern) else { return 0 }
 
-        let num1 = Int(match.1) ?? 0
-        let num2 = Int(match.2) ?? 0
+        let posX = Int(match.1) ?? 0  // e.g. 0, -16, -32, ..., -80
+        let posY = Int(match.2) ?? 0  // e.g. -1 (full), -21 (half)
 
-        var rate = Float(5) - Float(num1) / 16.0
-        if num2 == 21 {
+        // X=0 → 5 stars, X=-16 → 4 stars, X=-80 → 0 stars
+        var rate = Float(5) + Float(posX) / 16.0
+        // Y=-21 indicates half-star offset
+        if posY <= -21 {
             rate -= 0.5
         }
         return max(0, min(5, rate))

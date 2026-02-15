@@ -7,8 +7,11 @@
 
 import SwiftUI
 import EhSettings
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 struct SettingsView: View {
@@ -36,6 +39,7 @@ struct SettingsView: View {
         Form {
             accountSection
             siteSection
+            filterSection
             displaySection
             favoritesSection
             networkSection
@@ -61,13 +65,30 @@ struct SettingsView: View {
                     Image(systemName: "person.circle.fill")
                         .font(.title2)
                         .foregroundStyle(Color.accentColor)
-                    VStack(alignment: .leading) {
-                        Text("已登录")
-                            .font(.subheadline.bold())
-                        Text(vm.hasExAccess ? "ExHentai 可用" : "仅 E-Hentai")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let name = vm.displayName, !name.isEmpty {
+                            Text(name)
+                                .font(.subheadline.bold())
+                        } else {
+                            Text("已登录")
+                                .font(.subheadline.bold())
+                        }
+                        HStack(spacing: 8) {
+                            if let uid = vm.userId, !uid.isEmpty {
+                                Text("UID: \(uid)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(vm.hasExAccess ? "ExHentai 可用" : "仅 E-Hentai (未登录)")
+                                .font(.caption)
+                                .foregroundStyle(vm.hasExAccess ? Color.green : .secondary)
+                        }
                     }
+                }
+
+                // 身份 Cookies (对齐 Android: identity_cookie)
+                NavigationLink("身份 Cookies") {
+                    identityCookiesView
                 }
 
                 Button("注销", role: .destructive) {
@@ -98,10 +119,53 @@ struct SettingsView: View {
                 Text("ExHentai").tag(1)
             }
 
+            // EH 站点设置 (对齐 Android: u_config)
+            Button {
+                let site = AppSettings.shared.gallerySite
+                let url = site == .exHentai
+                    ? "https://exhentai.org/uconfig.php"
+                    : "https://e-hentai.org/uconfig.php"
+                openURL(URL(string: url)!)
+            } label: {
+                HStack {
+                    Text("EH 站点设置")
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // 我的标签 (对齐 Android: my_tags)
+            Button {
+                let site = AppSettings.shared.gallerySite
+                let url = site == .exHentai
+                    ? "https://exhentai.org/mytags"
+                    : "https://e-hentai.org/mytags"
+                openURL(URL(string: url)!)
+            } label: {
+                HStack {
+                    Text("我的标签")
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Picker("列表模式", selection: $vm.listMode) {
                 Text("列表").tag(0)
                 Text("紧凑").tag(1)
                 Text("网格").tag(2)
+            }
+
+            // 详情页大小 (对齐 Android Settings.KEY_DETAIL_SIZE)
+            Picker("详情页大小", selection: Binding(
+                get: { AppSettings.shared.detailSize },
+                set: { AppSettings.shared.detailSize = $0 }
+            )) {
+                Text("常规").tag(0)
+                Text("大号").tag(1)
             }
 
             Toggle("显示日文标题", isOn: $vm.showJpnTitle)
@@ -136,10 +200,55 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(vm.isUpdatingTagDb)
+
+                // 标签翻译来源标注 (对齐 Android: tag_translations_source)
+                Button {
+                    openURL(URL(string: "https://github.com/EhTagTranslation")!)
+                } label: {
+                    HStack {
+                        Text("补充翻译（由 EhTagTranslator 提供）")
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             NavigationLink("标签过滤") {
                 FilterView()
+            }
+
+            // 屏蔽列表 (对齐 Android: BlackListActivity)
+            NavigationLink("屏蔽列表") {
+                FilterView()
+            }
+
+            // 移动网络警告 (对齐 Android: cellular_network_warning)
+            Toggle("移动网络提醒", isOn: Binding(
+                get: { AppSettings.shared.cellularNetworkWarning },
+                set: { AppSettings.shared.cellularNetworkWarning = $0 }
+            ))
+        }
+    }
+
+    // MARK: - Filter / Search (对齐 Android: 默认分类/排除标签命名空间/排除语言)
+
+    private var filterSection: some View {
+        Section("搜索过滤") {
+            // 默认搜索分类 (对齐 Android Settings.KEY_DEFAULT_CATEGORIES)
+            NavigationLink("默认搜索分类") {
+                defaultCategoriesView
+            }
+
+            // 排除的标签命名空间 (对齐 Android Settings.KEY_EXCLUDED_TAG_NAMESPACES)
+            NavigationLink("排除的标签命名空间") {
+                excludedNamespacesView
+            }
+
+            // 排除的语言 (对齐 Android Settings.KEY_EXCLUDED_LANGUAGES)
+            NavigationLink("排除的语言") {
+                excludedLanguagesView
             }
         }
     }
@@ -153,6 +262,12 @@ struct SettingsView: View {
             Toggle("DNS over HTTPS", isOn: $vm.dnsOverHttps)
 
             Toggle("内置 Hosts", isOn: $vm.builtInHosts)
+
+            // 内置 ExH Hosts (对齐 Android: built_ex_hosts)
+            Toggle("内置 ExH Hosts", isOn: Binding(
+                get: { AppSettings.shared.builtExHosts },
+                set: { AppSettings.shared.builtExHosts = $0 }
+            ))
             
             // 网络诊断按钮
             Button {
@@ -236,6 +351,21 @@ struct SettingsView: View {
                 Text("中").tag(1)
                 Text("大").tag(2)
             }
+
+            // 缩略图分辨率 (对齐 Android Settings.KEY_THUMB_RESOLUTION)
+            Picker("缩略图分辨率", selection: Binding(
+                get: { AppSettings.shared.thumbResolution },
+                set: { AppSettings.shared.thumbResolution = $0 }
+            )) {
+                Text("普通").tag(0)
+                Text("高清").tag(1)
+            }
+
+            // 修复缩略图 URL (对齐 Android Settings.KEY_FIX_THUMB_URL)
+            Toggle("修复缩略图链接", isOn: Binding(
+                get: { AppSettings.shared.fixThumbUrl },
+                set: { AppSettings.shared.fixThumbUrl = $0 }
+            ))
 
             // 大屏幕列表布局 (对齐 Android: 全宽单列表布局选项)
             Picker("宽屏布局", selection: Binding(
@@ -330,7 +460,13 @@ struct SettingsView: View {
             // 屏幕旋转 (对齐 Android Settings.KEY_SCREEN_ROTATION)
             Picker("屏幕旋转", selection: Binding(
                 get: { AppSettings.shared.screenRotation },
-                set: { AppSettings.shared.screenRotation = $0 }
+                set: { newValue in
+                    AppSettings.shared.screenRotation = newValue
+                    // 立即应用旋转设置
+                    #if os(iOS)
+                    applyScreenRotation(newValue)
+                    #endif
+                }
             )) {
                 Text("跟随系统").tag(0)
                 Text("竖屏锁定").tag(1)
@@ -397,10 +533,7 @@ struct SettingsView: View {
             }
 
             // 自动翻页间隔 (对齐 Android Settings.KEY_AUTO_PAGE_INTERVAL)
-            Stepper("自动翻页间隔: \(AppSettings.shared.autoPageInterval)s", value: Binding(
-                get: { AppSettings.shared.autoPageInterval },
-                set: { AppSettings.shared.autoPageInterval = $0 }
-            ), in: 1...60)
+            Stepper("自动翻页间隔: \(vm.autoPageInterval)s", value: $vm.autoPageInterval, in: 1...60)
 
             Toggle("色彩滤镜 (护眼)", isOn: Binding(
                 get: { AppSettings.shared.colorFilter },
@@ -434,10 +567,7 @@ struct SettingsView: View {
             Stepper("超时 (秒): \(vm.downloadTimeout)", value: $vm.downloadTimeout, in: 10...120, step: 10)
 
             // 下载延迟 (对齐 Android Settings.KEY_DOWNLOAD_DELAY)
-            Stepper("下载延迟: \(AppSettings.shared.downloadDelay) ms", value: Binding(
-                get: { AppSettings.shared.downloadDelay },
-                set: { AppSettings.shared.downloadDelay = $0 }
-            ), in: 0...2000, step: 100)
+            Stepper("下载延迟: \(vm.downloadDelay) ms", value: $vm.downloadDelay, in: 0...2000, step: 100)
 
             // 图片分辨率设置 (对齐 Android Settings.KEY_IMAGE_RESOLUTION)
             Picker("图片分辨率", selection: Binding(
@@ -454,6 +584,22 @@ struct SettingsView: View {
                 get: { AppSettings.shared.downloadOriginImage },
                 set: { AppSettings.shared.downloadOriginImage = $0 }
             ))
+
+            // 媒体扫描 (对齐 Android: media_scan)
+            Toggle("媒体扫描", isOn: Binding(
+                get: { AppSettings.shared.mediaScan },
+                set: { AppSettings.shared.mediaScan = $0 }
+            ))
+
+            // 恢复下载项目 (对齐 Android: restore_download_items)
+            Button("恢复下载项目") {
+                vm.restoreDownloadItems()
+            }
+
+            // 清除冗余数据 (对齐 Android: clean_redundancy)
+            Button("清除下载冗余数据") {
+                vm.cleanRedundancy()
+            }
         }
     }
 
@@ -461,6 +607,21 @@ struct SettingsView: View {
 
     private var cacheSection: some View {
         Section("缓存") {
+            // 阅读缓存大小 (对齐 Android Settings.KEY_READ_CACHE_SIZE)
+            Picker("阅读缓存大小", selection: Binding(
+                get: { AppSettings.shared.readCacheSize },
+                set: { AppSettings.shared.readCacheSize = $0 }
+            )) {
+                Text("40 MB").tag(40)
+                Text("80 MB").tag(80)
+                Text("120 MB").tag(120)
+                Text("160 MB").tag(160)
+                Text("240 MB").tag(240)
+                Text("320 MB").tag(320)
+                Text("480 MB").tag(480)
+                Text("640 MB").tag(640)
+            }
+
             HStack {
                 Text("磁盘缓存")
                 Spacer()
@@ -468,7 +629,12 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Button("清除缓存") {
+            // 清除内存缓存 (对齐 Android: clear_memory_cache)
+            Button("清除内存缓存") {
+                vm.clearMemoryCache()
+            }
+
+            Button("清除磁盘缓存") {
                 vm.clearCache()
             }
         }
@@ -503,16 +669,30 @@ struct SettingsView: View {
     private var advancedSection: some View {
         Section("高级") {
             // 历史记录容量 (对齐 Android Settings.KEY_HISTORY_INFO_SIZE)
-            Stepper("历史记录上限: \(AppSettings.shared.historyInfoSize)", value: Binding(
-                get: { AppSettings.shared.historyInfoSize },
-                set: { AppSettings.shared.historyInfoSize = $0 }
-            ), in: 100...2000, step: 100)
+            Stepper("历史记录上限: \(vm.historyInfoSize)", value: $vm.historyInfoSize, in: 100...2000, step: 100)
 
             // 保存解析错误 (对齐 Android Settings.KEY_SAVE_PARSE_ERROR_BODY)
             Toggle("保存解析错误", isOn: Binding(
                 get: { AppSettings.shared.saveParseErrorBody },
                 set: { AppSettings.shared.saveParseErrorBody = $0 }
             ))
+
+            // 导出数据 (对齐 Android: export_data)
+            Button("导出数据") {
+                vm.exportData()
+            }
+
+            // 导入数据 (对齐 Android: import_data)
+            Button("导入数据") {
+                vm.importData()
+            }
+            .fileImporter(
+                isPresented: $vm.showImportPicker,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                vm.handleImport(result)
+            }
         }
     }
 
@@ -528,7 +708,7 @@ struct SettingsView: View {
             }
 
             Button("源代码") {
-                openURL(URL(string: "https://github.com/nicegram/EhViewer")!)
+                openURL(URL(string: "https://github.com/felixchaos/EhViewer-Apple")!)
             }
 
             NavigationLink("开源协议") {
@@ -539,12 +719,374 @@ struct SettingsView: View {
 
     private var licensesView: some View {
         List {
-            ForEach(["GRDB.swift", "SwiftSoup", "SDWebImageSwiftUI"], id: \.self) { name in
-                Text(name)
-                    .font(.subheadline)
+            // 本项目
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("EhViewer-Apple")
+                            .font(.headline)
+                        Spacer()
+                        Text("Apache-2.0")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Copyright © 2024 felixchaos")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("""
+Licensed under the Apache License, Version 2.0 (the "License"); \
+you may not use this file except in compliance with the License. \
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software \
+distributed under the License is distributed on an "AS IS" BASIS, \
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. \
+See the License for the specific language governing permissions and \
+limitations under the License.
+""")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("本项目")
+            }
+
+            // 致谢
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("EhViewer")
+                        .font(.subheadline.bold())
+                    Text("原始 Android EhViewer 项目")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("EhViewer_CN_SXJ")
+                        .font(.subheadline.bold())
+                    Text("EhViewer 中文分支，本项目参考了其 UI 设计与功能逻辑")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("致谢")
+            }
+
+            // 第三方库
+            Section {
+                ForEach(licensedLibraries, id: \.name) { lib in
+                    DisclosureGroup {
+                        Text(lib.licenseText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } label: {
+                        HStack {
+                            Text(lib.name)
+                                .font(.subheadline)
+                            Spacer()
+                            Text(lib.license)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("第三方开源库")
             }
         }
         .navigationTitle("开源协议")
+    }
+
+    private struct LicensedLibrary {
+        let name: String
+        let license: String
+        let licenseText: String
+    }
+
+    private var licensedLibraries: [LicensedLibrary] {
+        [
+            LicensedLibrary(
+                name: "GRDB.swift",
+                license: "MIT",
+                licenseText: """
+Copyright (C) 2015-2024 Gwendal Roué
+
+Permission is hereby granted, free of charge, to any person obtaining a copy \
+of this software and associated documentation files (the "Software"), to deal \
+in the Software without restriction, including without limitation the rights \
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell \
+copies of the Software, and to permit persons to whom the Software is \
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all \
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR \
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, \
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE \
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER \
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, \
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE \
+SOFTWARE.
+"""
+            ),
+            LicensedLibrary(
+                name: "SwiftSoup",
+                license: "MIT",
+                licenseText: """
+Copyright (c) 2016 Nabil Chatbi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy \
+of this software and associated documentation files (the "Software"), to deal \
+in the Software without restriction, including without limitation the rights \
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell \
+copies of the Software, and to permit persons to whom the Software is \
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all \
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR \
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, \
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE \
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER \
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, \
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE \
+SOFTWARE.
+"""
+            ),
+            LicensedLibrary(
+                name: "SDWebImageSwiftUI",
+                license: "MIT",
+                licenseText: """
+Copyright (c) 2019 lizhuoli1126@126.com
+
+Permission is hereby granted, free of charge, to any person obtaining a copy \
+of this software and associated documentation files (the "Software"), to deal \
+in the Software without restriction, including without limitation the rights \
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell \
+copies of the Software, and to permit persons to whom the Software is \
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all \
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR \
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, \
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE \
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER \
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, \
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE \
+SOFTWARE.
+"""
+            ),
+        ]
+    }
+
+    // MARK: - Screen Rotation Helper
+
+    #if os(iOS)
+    /// 立即应用屏幕旋转设置 (对齐 Android setRequestedOrientation)
+    private func applyScreenRotation(_ mode: Int) {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first else { return }
+
+        let orientations: UIInterfaceOrientationMask
+        switch mode {
+        case 1:
+            orientations = .portrait
+        case 2:
+            orientations = .landscape
+        default:
+            orientations = .allButUpsideDown
+        }
+
+        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: orientations)
+        windowScene.requestGeometryUpdate(geometryPreferences) { error in
+            print("[SettingsView] 旋转更新错误: \(error.localizedDescription)")
+        }
+    }
+    #endif
+
+    // MARK: - Identity Cookies View (对齐 Android: IdentityCookiePreference)
+
+    private var identityCookiesView: some View {
+        List {
+            let ehCookies = HTTPCookieStorage.shared.cookies(for: URL(string: "https://e-hentai.org")!) ?? []
+            let exCookies = HTTPCookieStorage.shared.cookies(for: URL(string: "https://exhentai.org")!) ?? []
+
+            Section("E-Hentai Cookies") {
+                ForEach(ehCookies, id: \.name) { cookie in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(cookie.name)
+                            .font(.subheadline.bold())
+                        Text(cookie.value)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .contextMenu {
+                        Button("复制") {
+                            #if os(iOS)
+                            UIPasteboard.general.string = "\(cookie.name)=\(cookie.value)"
+                            #else
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("\(cookie.name)=\(cookie.value)", forType: .string)
+                            #endif
+                        }
+                    }
+                }
+                if ehCookies.isEmpty {
+                    Text("无 Cookie")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("ExHentai Cookies") {
+                ForEach(exCookies, id: \.name) { cookie in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(cookie.name)
+                            .font(.subheadline.bold())
+                        Text(cookie.value)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .contextMenu {
+                        Button("复制") {
+                            #if os(iOS)
+                            UIPasteboard.general.string = "\(cookie.name)=\(cookie.value)"
+                            #else
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("\(cookie.name)=\(cookie.value)", forType: .string)
+                            #endif
+                        }
+                    }
+                }
+                if exCookies.isEmpty {
+                    Text("无 Cookie")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("身份 Cookies")
+    }
+
+    // MARK: - Default Categories View (对齐 Android: DefaultCategoryActivity)
+
+    private var defaultCategoriesView: some View {
+        let allCategories: [(String, Int)] = [
+            ("同人志 (Doujinshi)", 1),
+            ("漫画 (Manga)", 2),
+            ("画师CG (Artist CG)", 4),
+            ("游戏CG (Game CG)", 8),
+            ("欧美 (Western)", 512),
+            ("非H (Non-H)", 256),
+            ("图集 (Image Set)", 16),
+            ("Cosplay", 32),
+            ("亚洲 (Asian Porn)", 64),
+            ("杂项 (Misc)", 128),
+        ]
+
+        return List {
+            ForEach(allCategories, id: \.1) { name, bit in
+                let isEnabled = (AppSettings.shared.defaultCategories & bit) != 0
+                Toggle(name, isOn: Binding(
+                    get: { isEnabled },
+                    set: { newValue in
+                        if newValue {
+                            AppSettings.shared.defaultCategories |= bit
+                        } else {
+                            AppSettings.shared.defaultCategories &= ~bit
+                        }
+                    }
+                ))
+            }
+        }
+        .navigationTitle("默认搜索分类")
+    }
+
+    // MARK: - Excluded Tag Namespaces View (对齐 Android: ExcludedTagNamespacesActivity)
+
+    private var excludedNamespacesView: some View {
+        let namespaces: [(String, Int)] = [
+            ("Reclass", 1),
+            ("Language", 2),
+            ("Parody", 4),
+            ("Character", 8),
+            ("Group", 16),
+            ("Artist", 32),
+            ("Male", 64),
+            ("Female", 128),
+            ("Mixed", 256),
+            ("Cosplayer", 512),
+            ("Other", 1024),
+            ("Temp", 2048),
+        ]
+
+        return List {
+            Section {
+                Text("已选中的命名空间将从搜索结果的标签列表中排除")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(namespaces, id: \.1) { name, bit in
+                let isExcluded = (AppSettings.shared.excludedTagNamespaces & bit) != 0
+                Toggle(name, isOn: Binding(
+                    get: { isExcluded },
+                    set: { newValue in
+                        if newValue {
+                            AppSettings.shared.excludedTagNamespaces |= bit
+                        } else {
+                            AppSettings.shared.excludedTagNamespaces &= ~bit
+                        }
+                    }
+                ))
+            }
+        }
+        .navigationTitle("排除的标签命名空间")
+    }
+
+    // MARK: - Excluded Languages View (对齐 Android: ExcludedLanguagesActivity)
+
+    private var excludedLanguagesView: some View {
+        let languages = [
+            "Japanese", "English", "Chinese", "Dutch", "French",
+            "German", "Hungarian", "Italian", "Korean", "Polish",
+            "Portuguese", "Russian", "Spanish", "Thai", "Vietnamese",
+            "N/A", "Other",
+        ]
+
+        return List {
+            Section {
+                Text("已选中的语言将从搜索结果中排除")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(Array(languages.enumerated()), id: \.offset) { index, lang in
+                let bit = 1 << index
+                let currentExcluded = Int(AppSettings.shared.excludedLanguages ?? "0") ?? 0
+                let isExcluded = (currentExcluded & bit) != 0
+                Toggle(lang, isOn: Binding(
+                    get: { isExcluded },
+                    set: { newValue in
+                        var current = Int(AppSettings.shared.excludedLanguages ?? "0") ?? 0
+                        if newValue {
+                            current |= bit
+                        } else {
+                            current &= ~bit
+                        }
+                        AppSettings.shared.excludedLanguages = String(current)
+                    }
+                ))
+            }
+        }
+        .navigationTitle("排除的语言")
     }
 }
 
@@ -554,24 +1096,22 @@ struct SettingsView: View {
 class SettingsViewModel {
     var isLoggedIn = false
     var hasExAccess = false
+    var displayName: String?
+    var userId: String?
     var showLogoutConfirm = false
     var showLogin = false
 
-    var gallerySite: Int {
-        get { AppSettings.shared.gallerySite.rawValue }
-        set { AppSettings.shared.gallerySite = EhSite(rawValue: newValue) ?? .eHentai }
+    var gallerySite: Int = 0 {
+        didSet { AppSettings.shared.gallerySite = EhSite(rawValue: gallerySite) ?? .eHentai }
     }
-    var listMode: Int {
-        get { AppSettings.shared.listMode.rawValue }
-        set { AppSettings.shared.listMode = ListMode(rawValue: newValue) ?? .list }
+    var listMode: Int = 0 {
+        didSet { AppSettings.shared.listMode = ListMode(rawValue: listMode) ?? .list }
     }
-    var showJpnTitle: Bool {
-        get { AppSettings.shared.showJpnTitle }
-        set { AppSettings.shared.showJpnTitle = newValue }
+    var showJpnTitle: Bool = false {
+        didSet { AppSettings.shared.showJpnTitle = showJpnTitle }
     }
-    var showTagTranslations: Bool {
-        get { AppSettings.shared.showTagTranslations }
-        set { AppSettings.shared.showTagTranslations = newValue }
+    var showTagTranslations: Bool = true {
+        didSet { AppSettings.shared.showTagTranslations = showTagTranslations }
     }
     
     // 标签数据库状态
@@ -606,33 +1146,35 @@ class SettingsViewModel {
         }
     }
     
-    var domainFronting: Bool {
-        get { AppSettings.shared.domainFronting }
-        set { AppSettings.shared.domainFronting = newValue }
+    var domainFronting: Bool = false {
+        didSet { AppSettings.shared.domainFronting = domainFronting }
     }
-    var dnsOverHttps: Bool {
-        get { AppSettings.shared.dnsOverHttps }
-        set { AppSettings.shared.dnsOverHttps = newValue }
+    var dnsOverHttps: Bool = false {
+        didSet { AppSettings.shared.dnsOverHttps = dnsOverHttps }
     }
-    var builtInHosts: Bool {
-        get { AppSettings.shared.builtInHosts }
-        set { AppSettings.shared.builtInHosts = newValue }
+    var builtInHosts: Bool = false {
+        didSet { AppSettings.shared.builtInHosts = builtInHosts }
     }
-    var preloadImage: Int {
-        get { AppSettings.shared.preloadImage }
-        set { AppSettings.shared.preloadImage = newValue }
+    var preloadImage: Int = 5 {
+        didSet { AppSettings.shared.preloadImage = preloadImage }
     }
-    var keepScreenOn: Bool {
-        get { AppSettings.shared.keepScreenOn }
-        set { AppSettings.shared.keepScreenOn = newValue }
+    var keepScreenOn: Bool = false {
+        didSet { AppSettings.shared.keepScreenOn = keepScreenOn }
     }
-    var multiThread: Int {
-        get { AppSettings.shared.multiThreadDownload }
-        set { AppSettings.shared.multiThreadDownload = newValue }
+    var multiThread: Int = 3 {
+        didSet { AppSettings.shared.multiThreadDownload = multiThread }
     }
-    var downloadTimeout: Int {
-        get { AppSettings.shared.downloadTimeout }
-        set { AppSettings.shared.downloadTimeout = newValue }
+    var downloadTimeout: Int = 60 {
+        didSet { AppSettings.shared.downloadTimeout = downloadTimeout }
+    }
+    var downloadDelay: Int = 0 {
+        didSet { AppSettings.shared.downloadDelay = downloadDelay }
+    }
+    var autoPageInterval: Int = 5 {
+        didSet { AppSettings.shared.autoPageInterval = autoPageInterval }
+    }
+    var historyInfoSize: Int = 100 {
+        didSet { AppSettings.shared.historyInfoSize = historyInfoSize }
     }
 
     // 网络诊断状态
@@ -681,6 +1223,23 @@ class SettingsViewModel {
     #endif
 
     init() {
+        // 从 AppSettings 加载初始值到 stored properties
+        // (didSet 不会在 init 中触发，所以这些赋值不会写回 AppSettings)
+        gallerySite = AppSettings.shared.gallerySite.rawValue
+        listMode = AppSettings.shared.listMode.rawValue
+        showJpnTitle = AppSettings.shared.showJpnTitle
+        showTagTranslations = AppSettings.shared.showTagTranslations
+        domainFronting = AppSettings.shared.domainFronting
+        dnsOverHttps = AppSettings.shared.dnsOverHttps
+        builtInHosts = AppSettings.shared.builtInHosts
+        preloadImage = AppSettings.shared.preloadImage
+        keepScreenOn = AppSettings.shared.keepScreenOn
+        multiThread = AppSettings.shared.multiThreadDownload
+        downloadTimeout = AppSettings.shared.downloadTimeout
+        downloadDelay = AppSettings.shared.downloadDelay
+        autoPageInterval = AppSettings.shared.autoPageInterval
+        historyInfoSize = AppSettings.shared.historyInfoSize
+        
         checkLoginState()
         calculateCacheSize()
     }
@@ -689,8 +1248,24 @@ class SettingsViewModel {
         let ehCookies = HTTPCookieStorage.shared.cookies(for: URL(string: "https://e-hentai.org")!) ?? []
         isLoggedIn = ehCookies.contains { $0.name == "ipb_member_id" }
 
+        // ExH 访问权限: 只要已登录(有 memberId + passHash)就允许切换到 ExHentai
+        // igneous Cookie 只有首次访问 exhentai.org 后才会被种下
+        // Android 端同样允许已登录用户自由切换站点
         let exCookies = HTTPCookieStorage.shared.cookies(for: URL(string: "https://exhentai.org")!) ?? []
-        hasExAccess = exCookies.contains { $0.name == "igneous" && !$0.value.isEmpty && $0.value != "mystery" }
+        let hasIgneous = exCookies.contains { $0.name == "igneous" && !$0.value.isEmpty && $0.value != "mystery" }
+        hasExAccess = isLoggedIn || hasIgneous
+
+        // 加载保存的用户信息
+        displayName = AppSettings.shared.displayName
+        userId = AppSettings.shared.userId
+
+        // 如果没有保存 UID，尝试从 Cookie 读取
+        if userId == nil || userId?.isEmpty == true {
+            if let memberId = ehCookies.first(where: { $0.name == "ipb_member_id" })?.value {
+                userId = memberId
+                AppSettings.shared.userId = memberId
+            }
+        }
     }
 
     func logout() {
@@ -703,6 +1278,12 @@ class SettingsViewModel {
         }
         isLoggedIn = false
         hasExAccess = false
+        displayName = nil
+        userId = nil
+        AppSettings.shared.isLogin = false
+        AppSettings.shared.displayName = nil
+        AppSettings.shared.userId = nil
+        AppSettings.shared.avatar = nil
     }
     
     /// 网络诊断
@@ -790,6 +1371,126 @@ class SettingsViewModel {
                 self.isDiagnosing = false
             }
         }
+    }
+
+    // MARK: - 下载管理 (对齐 Android)
+
+    /// 恢复下载项目 (对齐 Android: RestoreDownloadPreference)
+    func restoreDownloadItems() {
+        // TODO: 从下载目录扫描已有画廊并恢复下载记录
+        print("[SettingsVM] Restore download items - not yet implemented")
+    }
+
+    /// 清除冗余数据 (对齐 Android: CleanRedundancyPreference)
+    func cleanRedundancy() {
+        // TODO: 扫描下载目录并清除不在数据库中的文件
+        print("[SettingsVM] Clean redundancy - not yet implemented")
+    }
+
+    /// 清除内存缓存
+    func clearMemoryCache() {
+        GalleryCache.shared.clearAll()
+    }
+
+    // MARK: - 数据导出/导入 (对齐 Android: ExportDataPreference / ImportDataPreference)
+
+    var showImportPicker = false
+    var showExportSuccess = false
+
+    /// 导出数据: 将 UserDefaults 设置导出为 JSON
+    func exportData() {
+        let defaults = UserDefaults.standard
+        let allKeys = [
+            "gallery_site", "domain_fronting", "dns_over_https", "built_in_hosts",
+            "multi_thread_download", "preload_image", "download_delay", "download_timeout",
+            "download_origin_image", "image_resolution", "read_cache_size", "list_mode",
+            "show_jpn_title", "show_tag_translations", "show_gallery_comment", "show_gallery_rating",
+            "show_read_progress", "wide_screen_list_mode", "show_eh_events", "show_eh_limits",
+            "default_categories", "excluded_tag_namespaces", "excluded_languages",
+            "reading_direction", "page_scaling", "start_position", "keep_screen_on",
+            "reading_fullscreen", "gallery_show_clock", "gallery_show_progress", "gallery_show_battery",
+            "show_page_interval", "volume_page", "reverse_volume_page", "screen_rotation",
+            "auto_page_interval", "color_filter", "default_favorite_2", "thumb_size",
+            "detail_size", "thumb_resolution", "fix_thumb_url", "media_scan",
+            "enable_secure", "security_delay", "save_parse_error_body", "history_info_size",
+            "theme", "launch_page", "show_gallery_pages", "cellular_network_warning",
+            "custom_screen_lightness", "screen_lightness",
+        ]
+
+        var exportDict: [String: Any] = [:]
+        for key in allKeys {
+            if let value = defaults.object(forKey: key) {
+                exportDict[key] = value
+            }
+        }
+
+        // 收藏夹名称
+        for i in 0..<10 {
+            if let name = defaults.string(forKey: "fav_cat_\(i)") {
+                exportDict["fav_cat_\(i)"] = name
+            }
+        }
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: exportDict, options: .prettyPrinted) else {
+            return
+        }
+
+        #if os(iOS)
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ehviewer_settings.json")
+        try? jsonData.write(to: tempURL)
+
+        let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let rootVC = windowScene.windows.first?.rootViewController {
+            rootVC.present(activityVC, animated: true)
+        }
+        #else
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "ehviewer_settings.json"
+        panel.title = "导出设置"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? jsonData.write(to: url)
+        }
+        #endif
+    }
+
+    /// 导入数据
+    func importData() {
+        showImportPicker = true
+    }
+
+    func handleImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let data = try? Data(contentsOf: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        for (key, value) in dict {
+            defaults.set(value, forKey: key)
+        }
+
+        // 重新加载 ViewModel 的存储属性
+        gallerySite = AppSettings.shared.gallerySite.rawValue
+        listMode = AppSettings.shared.listMode.rawValue
+        showJpnTitle = AppSettings.shared.showJpnTitle
+        showTagTranslations = AppSettings.shared.showTagTranslations
+        domainFronting = AppSettings.shared.domainFronting
+        dnsOverHttps = AppSettings.shared.dnsOverHttps
+        builtInHosts = AppSettings.shared.builtInHosts
+        preloadImage = AppSettings.shared.preloadImage
+        keepScreenOn = AppSettings.shared.keepScreenOn
+        multiThread = AppSettings.shared.multiThreadDownload
+        downloadTimeout = AppSettings.shared.downloadTimeout
+        downloadDelay = AppSettings.shared.downloadDelay
+        autoPageInterval = AppSettings.shared.autoPageInterval
+        historyInfoSize = AppSettings.shared.historyInfoSize
     }
 }
 

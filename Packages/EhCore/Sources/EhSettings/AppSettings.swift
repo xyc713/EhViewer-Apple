@@ -115,6 +115,12 @@ public final class AppSettings: @unchecked Sendable {
     }
 
     @ObservationIgnored
+    public var userId: String? {
+        get { UserDefaults.standard.string(forKey: "user_id") }
+        set { UserDefaults.standard.set(newValue, forKey: "user_id") }
+    }
+
+    @ObservationIgnored
     public var avatar: String? {
         get { UserDefaults.standard.string(forKey: "avatar") }
         set { UserDefaults.standard.set(newValue, forKey: "avatar") }
@@ -424,6 +430,50 @@ public final class AppSettings: @unchecked Sendable {
     public var historyInfoSize: Int {
         get { max(100, UserDefaults.standard.object(forKey: "history_info_size") as? Int ?? 100) }
         set { UserDefaults.standard.set(max(100, newValue), forKey: "history_info_size") }
+    }
+
+    // MARK: - Android 对齐: 附加设置
+
+    /// 详情页信息大小 (对齐 Android Settings.KEY_DETAIL_SIZE; 0=normal, 1=large)
+    @ObservationIgnored
+    public var detailSize: Int {
+        get { UserDefaults.standard.integer(forKey: "detail_size") }
+        set { UserDefaults.standard.set(newValue, forKey: "detail_size") }
+    }
+
+    /// 缩略图分辨率 (对齐 Android Settings.KEY_THUMB_RESOLUTION; 0=normal, 1=large)
+    @ObservationIgnored
+    public var thumbResolution: Int {
+        get { UserDefaults.standard.integer(forKey: "thumb_resolution") }
+        set { UserDefaults.standard.set(newValue, forKey: "thumb_resolution") }
+    }
+
+    /// 修复缩略图链接 (对齐 Android Settings.KEY_FIX_THUMB_URL)
+    @ObservationIgnored
+    public var fixThumbUrl: Bool {
+        get { UserDefaults.standard.bool(forKey: "fix_thumb_url") }
+        set { UserDefaults.standard.set(newValue, forKey: "fix_thumb_url") }
+    }
+
+    /// 内置 ExHentai Hosts (对齐 Android Settings.KEY_BUILT_IN_HOSTS_EX)
+    @ObservationIgnored
+    public var builtExHosts: Bool {
+        get { UserDefaults.standard.object(forKey: "built_ex_hosts") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "built_ex_hosts") }
+    }
+
+    /// 媒体扫描 (对齐 Android Settings.KEY_MEDIA_SCAN)
+    @ObservationIgnored
+    public var mediaScan: Bool {
+        get { UserDefaults.standard.bool(forKey: "media_scan") }
+        set { UserDefaults.standard.set(newValue, forKey: "media_scan") }
+    }
+
+    /// 导航栏主题色 (对齐 Android Settings.KEY_APPLY_NAV_BAR_THEME_COLOR)
+    @ObservationIgnored
+    public var applyNavBarThemeColor: Bool {
+        get { UserDefaults.standard.bool(forKey: "apply_nav_bar_theme_color") }
+        set { UserDefaults.standard.set(newValue, forKey: "apply_nav_bar_theme_color") }
     }
 
     private init() {

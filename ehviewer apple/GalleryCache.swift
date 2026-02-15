@@ -26,12 +26,12 @@ final class GalleryCache: @unchecked Sendable {
     private let imageURLCache = NSCache<NSString, NSString>()
 
     private init() {
-        // 对标 Android: LruCache<>(25) for detail
-        detailCache.countLimit = 25
-        // 列表缓存: 最多保留 20 个不同查询的结果
-        listCache.countLimit = 20
-        // 图片 URL 缓存: 最多 500 条
-        imageURLCache.countLimit = 500
+        // 对标 Android: LruCache for detail
+        detailCache.countLimit = 50
+        // 列表缓存: 最多保留 40 个不同查询的结果
+        listCache.countLimit = 40
+        // 图片 URL 缓存: 最多 1000 条
+        imageURLCache.countLimit = 1000
     }
 
     // MARK: - Detail
@@ -53,8 +53,8 @@ final class GalleryCache: @unchecked Sendable {
     /// 缓存 key = URL string (去掉 page 参数) + page
     func getListResult(forKey key: String) -> CachedGalleryListResult? {
         guard let wrapper = listCache.object(forKey: key as NSString) else { return nil }
-        // 缓存有效期: 5 分钟
-        if Date().timeIntervalSince(wrapper.timestamp) > 300 {
+        // 缓存有效期: 15 分钟
+        if Date().timeIntervalSince(wrapper.timestamp) > 900 {
             listCache.removeObject(forKey: key as NSString)
             return nil
         }

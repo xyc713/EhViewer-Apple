@@ -21,8 +21,26 @@ private enum ImageSessionProvider {
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 120
         config.httpMaximumConnectionsPerHost = 6
+        // 使用全局 URLCache (与 App init 中配置的 320MB 磁盘缓存一致)
+        config.urlCache = URLCache.shared
+        config.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: config)
     }()
+}
+
+/// 内存图片缓存 — 避免重复解码已下载的图片
+private final class ThumbnailMemoryCache: @unchecked Sendable {
+    static let shared = ThumbnailMemoryCache()
+    private let cache = NSCache<NSURL, PlatformImage>()
+    private init() {
+        cache.countLimit = 200
+        cache.totalCostLimit = 50 * 1024 * 1024  // 50MB
+    }
+    func get(_ url: URL) -> PlatformImage? { cache.object(forKey: url as NSURL) }
+    func set(_ image: PlatformImage, for url: URL) {
+        let cost = image.size.width * image.size.height * 4
+        cache.setObject(image, forKey: url as NSURL, cost: Int(cost))
+    }
 }
 
 /// 缓存友好的异步图片加载器
@@ -98,10 +116,17 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         isLoading = true
         defer { isLoading = false }
 
-        // 先检查缓存
+        // 1. 内存图片缓存 (最快, 避免重复解码)
+        if let memCached = ThumbnailMemoryCache.shared.get(url) {
+            await MainActor.run { self.image = memCached }
+            return
+        }
+
+        // 2. URLCache 磁盘缓存
         let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
         if let cached = URLCache.shared.cachedResponse(for: request),
            let img = PlatformImage(data: cached.data) {
+            ThumbnailMemoryCache.shared.set(img, for: url)
             await MainActor.run { self.image = img }
             return
         }
@@ -136,6 +161,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             URLCache.shared.storeCachedResponse(cachedResponse, for: request)
             
             if let img = PlatformImage(data: data) {
+                ThumbnailMemoryCache.shared.set(img, for: url)
                 await MainActor.run { self.image = img }
             } else {
                 await MainActor.run { self.hasFailed = true }

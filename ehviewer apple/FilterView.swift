@@ -14,6 +14,32 @@ struct FilterView: View {
 
     var body: some View {
         List {
+            // 快速屏蔽 (对齐 Android: BlackListActivity)
+            Section("快速屏蔽") {
+                ForEach(vm.quickBlockPresets, id: \.tag) { preset in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(preset.displayName)
+                                .font(.body)
+                            Text(preset.tag)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if vm.isTagBlocked(preset.tag) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Button("屏蔽") {
+                                vm.quickBlock(tag: preset.tag)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
+                    }
+                }
+            }
+
             // 启用的过滤器
             Section {
                 ForEach(vm.filters.filter { $0.enable }, id: \.id) { filter in
@@ -190,6 +216,30 @@ struct AddFilterSheet: View {
 @Observable
 class FilterViewModel {
     var filters: [FilterRecord] = []
+
+    // 快速屏蔽预设 (对齐 Android BlackList)
+    struct QuickBlockPreset {
+        let displayName: String
+        let tag: String
+    }
+
+    let quickBlockPresets: [QuickBlockPreset] = [
+        QuickBlockPreset(displayName: "扶她 (Futanari)", tag: "female:futanari"),
+        QuickBlockPreset(displayName: "R-18G (猎奇)", tag: "mixed:guro"),
+        QuickBlockPreset(displayName: "人兽 (Bestiality)", tag: "female:bestiality"),
+        QuickBlockPreset(displayName: "兽人 (Furry)", tag: "male:furry"),
+        QuickBlockPreset(displayName: "NTR (寝取)", tag: "female:netorare"),
+        QuickBlockPreset(displayName: "药物 (Drug)", tag: "female:drugs"),
+    ]
+
+    func isTagBlocked(_ tag: String) -> Bool {
+        filters.contains { $0.mode == 2 && $0.text == tag && $0.enable }
+    }
+
+    func quickBlock(tag: String) {
+        guard !isTagBlocked(tag) else { return }
+        addFilter(text: tag, mode: 2)
+    }
 
     func loadFilters() {
         do {

@@ -57,11 +57,6 @@ struct DownloadsView: View {
                 // 标签选择栏
                 labelPicker
 
-                // 状态过滤栏
-                if !filteredTasks.isEmpty || statusFilter != .all {
-                    statusFilterBar
-                }
-
                 // 内容
                 if filteredTasks.isEmpty {
                     ContentUnavailableView(
@@ -256,44 +251,6 @@ struct DownloadsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 状态过滤栏
-
-    private var statusFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(DownloadStatusFilter.allCases) { filter in
-                    let count = countForFilter(filter)
-                    Button {
-                        statusFilter = filter
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(filter.rawValue)
-                            if filter != .all && count > 0 {
-                                Text("\(count)")
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(statusFilter == filter ? Color.white.opacity(0.3) : Color(.tertiarySystemFill))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(statusFilter == filter ? Color.accentColor.opacity(0.8) : Color.clear)
-                        .foregroundStyle(statusFilter == filter ? .white : .secondary)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-        }
-    }
-
     private func countForFilter(_ filter: DownloadStatusFilter) -> Int {
         // 先用标签+搜索过滤，再按状态计数
         var tasks = vm.tasks
@@ -381,6 +338,21 @@ struct DownloadsView: View {
                 }
             } else {
                 // 普通模式
+
+                // 状态过滤 (对齐 Android DownloadsScene 状态筛选)
+                Picker("状态过滤", selection: $statusFilter) {
+                    ForEach(DownloadStatusFilter.allCases) { filter in
+                        let count = countForFilter(filter)
+                        if filter == .all {
+                            Text(filter.rawValue).tag(filter)
+                        } else {
+                            Text("\(filter.rawValue) (\(count))").tag(filter)
+                        }
+                    }
+                }
+
+                Divider()
+
                 Button {
                     isSelectMode = true
                     selectedGids.removeAll()
@@ -440,12 +412,14 @@ struct DownloadsView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    DownloadTaskRow(task: task) {
-                        vm.pauseTask(gid: task.gallery.gid)
-                    } onResume: {
-                        vm.resumeTask(gid: task.gallery.gid)
-                    } onDelete: {
-                        vm.deleteTask(gid: task.gallery.gid)
+                    NavigationLink(value: task.gallery) {
+                        DownloadTaskRow(task: task) {
+                            vm.pauseTask(gid: task.gallery.gid)
+                        } onResume: {
+                            vm.resumeTask(gid: task.gallery.gid)
+                        } onDelete: {
+                            vm.deleteTask(gid: task.gallery.gid)
+                        }
                     }
                 }
             }
@@ -637,10 +611,21 @@ struct DownloadTaskRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // 进度条
+                // 进度条 + 页数详情
                 if task.state == DownloadManager.stateDownload || task.state == DownloadManager.stateWait {
-                    ProgressView(value: progress)
-                        .tint(.accentColor)
+                    VStack(spacing: 2) {
+                        ProgressView(value: progress)
+                            .tint(.accentColor)
+                        HStack {
+                            Text("\(task.downloadedPages)/\(task.gallery.pages)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -762,9 +747,39 @@ struct DownloadTaskRow: View {
 @Observable
 class DownloadsViewModel {
     var tasks: [DownloadTask] = []
+    /// 进度刷新定时器 (有活跃下载时每秒刷新)
+    private var refreshTimer: Timer?
 
     func loadTasks() async {
         tasks = await DownloadManager.shared.getAllTasks()
+        updateRefreshTimer()
+    }
+
+    /// 检查是否有活跃下载，有则启动定时刷新
+    private func updateRefreshTimer() {
+        let hasActive = tasks.contains(where: {
+            $0.state == DownloadManager.stateDownload || $0.state == DownloadManager.stateWait
+        })
+
+        if hasActive && refreshTimer == nil {
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    self.tasks = await DownloadManager.shared.getAllTasks()
+                    // 如果没有活跃下载了，停止定时器
+                    let stillActive = self.tasks.contains(where: {
+                        $0.state == DownloadManager.stateDownload || $0.state == DownloadManager.stateWait
+                    })
+                    if !stillActive {
+                        self.refreshTimer?.invalidate()
+                        self.refreshTimer = nil
+                    }
+                }
+            }
+        } else if !hasActive {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+        }
     }
 
     func pauseTask(gid: Int64) {

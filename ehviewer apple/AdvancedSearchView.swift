@@ -215,10 +215,18 @@ struct AdvancedSearchView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("重置") { state.reset() }
+                    Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Button(role: .destructive) {
+                        state.reset()
+                    } label: {
+                        Label("重置所有选项", systemImage: "arrow.counterclockwise")
+                    }
+                    .tint(.red)
                 }
             }
         }

@@ -144,8 +144,12 @@ struct LoginView: View {
             AppSettings.shared.isLogin = true
             AppSettings.shared.displayName = displayName
 
-            // Sad Panda 检测: 尝试访问 ExHentai 检查是否获得权限
-            await checkExHentaiAccess()
+            // 保存 UID
+            if let uid = EhCookieManager.shared.memberId {
+                AppSettings.shared.userId = uid
+            }
+
+            // 异步获取完整用户资料 (avatar 等) — RootView 统一处理
 
             appState.isSignedIn = true
         } catch let error as EhParseError {
@@ -168,33 +172,6 @@ struct LoginView: View {
         isLoading = false
     }
 
-    /// Sad Panda 检测 — 尝试读取 ExHentai 检查是否有访问权限
-    /// 对齐 Android: 登录后检查 ExHentai 可达性
-    private func checkExHentaiAccess() async {
-        do {
-            guard let url = URL(string: "https://exhentai.org/") else { return }
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.setValue(EhRequestBuilder.userAgent, forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 10
-
-            let config = URLSessionConfiguration.default
-            config.httpCookieStorage = .shared
-            let session = URLSession(configuration: config)
-            let (data, response) = try await session.data(for: request)
-
-            if let httpResponse = response as? HTTPURLResponse {
-                // Sad Panda: ExHentai 返回非常小的响应 (通常是一张小图)
-                if httpResponse.statusCode == 200 && data.count < 1000 {
-                    print("[Login] Sad Panda detected — ExHentai 访问被拒绝")
-                } else if httpResponse.statusCode == 200 {
-                    print("[Login] ExHentai 访问正常")
-                }
-            }
-        } catch {
-            print("[Login] ExHentai 检测失败: \(error.localizedDescription)")
-        }
-    }
 }
 
 // MARK: - WebView 登录 (对齐 Android WebView 登录方式)
@@ -212,6 +189,7 @@ struct WebViewLoginView: View {
                 WebViewLogin(
                     isLoading: $isLoading,
                     onLoginDetected: { displayName in
+                        guard !loginDetected else { return }
                         loginDetected = true
 
                         // 同步 Cookie
@@ -220,8 +198,18 @@ struct WebViewLoginView: View {
 
                         // 保存登录状态
                         AppSettings.shared.isLogin = true
-                        if let name = displayName {
+                        if let name = displayName, !name.isEmpty {
                             AppSettings.shared.displayName = name
+                        }
+
+                        // 保存 UID (ipb_member_id)
+                        if let uid = EhCookieManager.shared.memberId {
+                            AppSettings.shared.userId = uid
+                        }
+
+                        // 登录后异步获取用户资料 + ExH 检测
+                        Task {
+                            await postLoginSetup()
                         }
 
                         appState.isSignedIn = true
@@ -244,6 +232,23 @@ struct WebViewLoginView: View {
             }
         }
     }
+
+    /// 登录后的异步设置：获取用户资料
+    /// ExH 检测由 RootView 统一处理
+    private func postLoginSetup() async {
+        // 获取用户资料 (displayName, avatar)
+        do {
+            let profile = try await EhAPI.shared.getProfile()
+            if let name = profile.displayName {
+                AppSettings.shared.displayName = name
+            }
+            if let avatar = profile.avatar {
+                AppSettings.shared.avatar = avatar
+            }
+        } catch {
+            print("[WebViewLogin] 获取用户资料失败: \(error)")
+        }
+    }
 }
 
 // MARK: - WKWebView 封装 (对齐 Android WebView Cookie 提取)
@@ -261,7 +266,9 @@ struct WebViewLogin: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         // 使用 iOS Safari 原生 UA — Cloudflare Turnstile 需要真实浏览器 UA
-        // Windows Chrome UA 会被 Cloudflare 识别为异常 (iOS 设备发 Windows UA)
+
+        // 监听 Cookie 变化 — 登录成功后 Cookie 被设置时立即检测
+        config.websiteDataStore.httpCookieStore.add(context.coordinator)
 
         // 加载论坛登录页面
         if let url = URL(string: EhURL.signInReferer) {
@@ -272,21 +279,33 @@ struct WebViewLogin: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
         let parent: WebViewLogin
+        private var hasDetected = false
+        private weak var webView: WKWebView?
+
         init(_ parent: WebViewLogin) { self.parent = parent }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            self.webView = webView
             parent.isLoading = false
             checkForLoginCookies(webView: webView)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            self.webView = webView
             parent.isLoading = true
         }
 
+        // WKHTTPCookieStoreObserver — Cookie 变化时自动触发
+        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+            guard !hasDetected, let webView = self.webView else { return }
+            checkForLoginCookies(webView: webView)
+        }
+
         private func checkForLoginCookies(webView: WKWebView) {
-            // 从 WKWebView 的 cookie store 获取 cookies
+            guard !hasDetected else { return }
+
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
                 var memberId: String?
                 var passHash: String?
@@ -294,23 +313,22 @@ struct WebViewLogin: UIViewRepresentable {
                 for cookie in cookies {
                     if cookie.name == "ipb_member_id" {
                         memberId = cookie.value
-                        // 同步到 HTTPCookieStorage
                         HTTPCookieStorage.shared.setCookie(cookie)
                     }
                     if cookie.name == "ipb_pass_hash" {
                         passHash = cookie.value
                         HTTPCookieStorage.shared.setCookie(cookie)
                     }
-                    // 同步其他有用的 cookies
                     if cookie.name == "igneous" || cookie.name == "sk" || cookie.name == "star" {
                         HTTPCookieStorage.shared.setCookie(cookie)
                     }
                 }
 
                 if memberId != nil && passHash != nil {
-                    // 提取用户名 (从页面中尝试获取)
+                    self.hasDetected = true
+                    // 尝试从页面提取用户名
                     webView.evaluateJavaScript(
-                        "document.querySelector('.home b')?.textContent || ''"
+                        "document.querySelector('#userlinks .home b')?.textContent || document.querySelector('.home b')?.textContent || ''"
                     ) { result, _ in
                         let name = result as? String
                         DispatchQueue.main.async {
@@ -337,6 +355,9 @@ struct WebViewLogin: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         // 使用 macOS Safari 原生 UA — Cloudflare Turnstile 需要真实浏览器 UA
 
+        // 监听 Cookie 变化
+        config.websiteDataStore.httpCookieStore.add(context.coordinator)
+
         if let url = URL(string: EhURL.signInReferer) {
             webView.load(URLRequest(url: url))
         }
@@ -345,20 +366,33 @@ struct WebViewLogin: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
         let parent: WebViewLogin
+        private var hasDetected = false
+        private weak var webView: WKWebView?
+
         init(_ parent: WebViewLogin) { self.parent = parent }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            self.webView = webView
             parent.isLoading = false
             checkForLoginCookies(webView: webView)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            self.webView = webView
             parent.isLoading = true
         }
 
+        // WKHTTPCookieStoreObserver — Cookie 变化时自动触发
+        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+            guard !hasDetected, let webView = self.webView else { return }
+            checkForLoginCookies(webView: webView)
+        }
+
         private func checkForLoginCookies(webView: WKWebView) {
+            guard !hasDetected else { return }
+
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
                 var memberId: String?
                 var passHash: String?
@@ -378,8 +412,9 @@ struct WebViewLogin: NSViewRepresentable {
                 }
 
                 if memberId != nil && passHash != nil {
+                    self.hasDetected = true
                     webView.evaluateJavaScript(
-                        "document.querySelector('.home b')?.textContent || ''"
+                        "document.querySelector('#userlinks .home b')?.textContent || document.querySelector('.home b')?.textContent || ''"
                     ) { result, _ in
                         let name = result as? String
                         DispatchQueue.main.async {

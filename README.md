@@ -1,6 +1,7 @@
 # EhViewer-Apple
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version"/>
   <img src="https://img.shields.io/badge/platform-iOS%2017%2B%20%7C%20macOS%2014%2B-blue" alt="Platform"/>
   <img src="https://img.shields.io/badge/swift-6.0-orange" alt="Swift 6.0"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"/>
@@ -11,6 +12,19 @@ EhViewer-Apple 是一款适用于 iOS 和 macOS 的 [E-Hentai](https://e-hentai.
 > **致敬**: 本项目灵感来源于 Android 端的 [EhViewer](https://github.com/Ehviewer-Overhauled/Ehviewer) 和 [EhViewer_CN_SXJ](https://github.com/xiaojieonly/Ehviewer_CN_SXJ)，感谢原作者的出色工作。
 
 ---
+
+## 📢 v1.0.0 版本说明
+
+首个正式版本，包含以下核心功能与优化：
+
+- **完整的画廊浏览体验** — 首页热门、最新、搜索、标签浏览
+- **高级搜索** — 分类筛选、关键词、标签、评分过滤、页码范围
+- **原生阅读器** — 横向翻页 / 纵向滚动，支持双指缩放，流畅手势翻页
+- **下载管理** — 后台下载、断点续传、标签分组、进度通知
+- **收藏同步** — 云端收藏夹 + 本地收藏，支持多文件夹管理
+- **多层缓存** — 内存 + 磁盘缓存，大幅提升二次加载速度
+- **安全保护** — Face ID / Touch ID / 密码锁，隐私无忧
+- **多平台原生** — iPhone / iPad / Mac 全平台适配
 
 ## ✨ 功能特性
 
@@ -71,11 +85,44 @@ cd EhViewer-Apple
 open "ehviewer apple.xcodeproj"
 ```
 
-### 3. 构建运行
+### 3. 构建运行 (Mac)
 
-在 Xcode 中选择目标设备（iPhone / Mac），按 `⌘R` 运行。
+在 Xcode 中选择 **My Mac** 作为目标设备，按 `⌘R` 运行。
 
 > **注意**: Swift Package 依赖会在首次打开时自动解析，请确保网络畅通。
+
+### 4. 安装到 iPhone / iPad
+
+将应用安装到 iOS 真机需要以下步骤：
+
+#### 前置条件
+
+1. **Apple ID** — 免费 Apple ID 即可（无需付费开发者账号）
+2. **Xcode 16.0+** — 从 Mac App Store 安装
+3. **USB 数据线** — 用于连接 iPhone/iPad（首次需要有线连接）
+
+#### 配置签名
+
+1. 打开 Xcode，进入菜单 **Xcode → Settings → Accounts**
+2. 点击左下角 **+**，选择 **Apple ID**，登录你的 Apple ID
+3. 在项目导航器中选择 **ehviewer apple** 项目（蓝色图标）
+4. 选择 **Signing & Capabilities** 标签页
+5. 勾选 **Automatically manage signing**
+6. 在 **Team** 下拉菜单中选择你的 Apple ID 对应的团队（通常是 `你的名字 (Personal Team)`）
+7. 如果 **Bundle Identifier** 冲突，修改为唯一值，例如 `com.yourname.ehviewer`
+
+#### 构建安装
+
+1. 用 USB 线将 iPhone/iPad 连接到 Mac
+2. 在设备上弹出的 **"信任此电脑"** 对话框中选择 **信任**
+3. 在 Xcode 顶部工具栏的设备列表中选择你的 iPhone/iPad
+4. 按 `⌘R` 构建并安装
+
+#### 首次安装注意事项
+
+- **设备信任**: 首次安装后需要在 iPhone/iPad 上前往 **设置 → 通用 → VPN与设备管理**，找到你的开发者描述文件并点击 **信任**
+- **免费账号限制**: 免费 Apple ID 签名的应用有效期为 **7 天**，到期后需要重新连接 Mac 用 Xcode 重新安装
+- **无线调试**: 首次有线连接成功后，可在 Xcode 中启用无线调试（**Window → Devices and Simulators**，勾选 **Connect via network**）
 
 ## 📱 截图
 

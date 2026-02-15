@@ -7,6 +7,8 @@
 
 import SwiftUI
 import EhSettings
+import EhAPI
+import EhCookie
 
 #if os(iOS)
 import UIKit
@@ -27,7 +29,9 @@ struct RootView: View {
     @State private var clipboardGallery: (gid: Int64, token: String)?
     @State private var showClipboardAlert = false
     @State private var lastClipboardContent: String?
-    
+
+    /// ExHentai 切换提示
+    @State private var showExHAlert = false
     enum OnboardingStep {
         case checking      // 检查状态中
         case warning       // 18+ 警告
@@ -83,7 +87,19 @@ struct RootView: View {
         .onChange(of: appState.isSignedIn) { _, isSignedIn in
             if isSignedIn {
                 flowStep = .main
+                // 登录后异步任务：获取资料 + ExH 检测
+                if !AppSettings.shared.skipSignIn {
+                    Task { await postLoginActions() }
+                }
             }
+        }
+        .alert("ExHentai 可用", isPresented: $showExHAlert) {
+            Button("切换到 ExHentai") {
+                AppSettings.shared.gallerySite = .exHentai
+            }
+            Button("保持 E-Hentai", role: .cancel) {}
+        } message: {
+            Text("检测到你的账号拥有 ExHentai 访问权限，是否切换到 ExHentai？")
         }
         // 对齐 Android: 深色模式支持 (Settings.KEY_THEME)
         // 0=跟随系统, 1=浅色, 2=深色
@@ -127,6 +143,49 @@ struct RootView: View {
     }
     
     // MARK: - 流程控制
+
+    /// 登录后异步操作：获取用户资料 + ExH 检测
+    private func postLoginActions() async {
+        // 1. 保存 UID
+        if let uid = EhCookieManager.shared.memberId {
+            AppSettings.shared.userId = uid
+        }
+
+        // 2. 获取用户资料
+        do {
+            let profile = try await EhAPI.shared.getProfile()
+            if let name = profile.displayName {
+                AppSettings.shared.displayName = name
+            }
+            if let avatar = profile.avatar {
+                AppSettings.shared.avatar = avatar
+            }
+        } catch {
+            print("[RootView] 获取用户资料失败: \(error)")
+        }
+
+        // 3. ExH 可达性检测
+        do {
+            guard let url = URL(string: "https://exhentai.org/") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue(EhRequestBuilder.userAgent, forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 10
+
+            let config = URLSessionConfiguration.default
+            config.httpCookieStorage = .shared
+            let exSession = URLSession(configuration: config)
+            let (data, response) = try await exSession.data(for: request)
+
+            if let httpResponse = response as? HTTPURLResponse,
+               httpResponse.statusCode == 200, data.count >= 1000 {
+                // ExHentai 可访问 — 提示切换
+                showExHAlert = true
+            }
+        } catch {
+            print("[RootView] ExHentai 检测失败: \(error)")
+        }
+    }
 
     /// 深色模式偏好 (对齐 Android: Settings.KEY_THEME)
     private var preferredColorScheme: ColorScheme? {

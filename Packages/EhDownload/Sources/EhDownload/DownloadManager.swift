@@ -177,6 +177,13 @@ public actor DownloadManager {
         }
     }
 
+    /// 更新下载进度 (由 SpiderInfoUpdater 调用，同步到队列以便 UI 读取)
+    public func updateDownloadedPages(gid: Int64, count: Int) {
+        if let index = downloadQueue.firstIndex(where: { $0.gallery.gid == gid }) {
+            downloadQueue[index].downloadedPages = count
+        }
+    }
+
     /// 设置下载监听器
     public func setListener(_ listener: DownloadListener?) {
         self.listener = listener
@@ -349,6 +356,9 @@ final class SpiderInfoUpdater: SpiderDelegate, @unchecked Sendable {
 
     func onPageLoaded(index: Int, imageUrl: String) async {
         downloadedCount += 1
+
+        // 同步更新 DownloadManager 队列中的进度 (便于 UI 读取)
+        await DownloadManager.shared.updateDownloadedPages(gid: gid, count: downloadedCount)
 
         // 计算速度 (字节/秒，这里简化为页数/秒 * 估计大小)
         let elapsed = Date().timeIntervalSince(startTime)

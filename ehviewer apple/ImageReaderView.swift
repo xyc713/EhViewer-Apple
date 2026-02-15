@@ -122,7 +122,9 @@ struct ImageReaderView: View {
     @Environment(\.dismiss) private var dismiss
 
     // 点击区域比例
-    private let tapZoneRatio: CGFloat = 0.3
+    private let tapZoneRatio: CGFloat = 0.25
+    /// 纵向边缘死区比例 (上下各 15%，对齐 Android 手势区域)
+    private let tapZoneVerticalDeadZone: CGFloat = 0.15
     
     /// 显式初始化器 (解决 Swift 默认参数在链接时的问题)
     init(
@@ -591,11 +593,11 @@ struct ImageReaderView: View {
                     scaleMode: scaleMode,
                     startPosition: startPosition,
                     allowsHorizontalScrollAtMinZoom: readingDirection == .topToBottom,
-                    onSingleTap: {
+                    onSingleTap: readingDirection == .topToBottom ? {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             showOverlay.toggle()
                         }
-                    }
+                    } : nil  // 翻页模式由 tapZones 统一处理点击，避免边缘误触
                 )
             } else if vm.imageURLs[index] != nil {
                 // URL 已获取，正在下载图片数据 — 显示下载百分比进度
@@ -649,14 +651,33 @@ struct ImageReaderView: View {
         }
     }
 
-    // MARK: - Tap Zones
+    // MARK: - Tap Zones (对齐 Android GalleryView 手势区域: 2D 网格布局)
+    // 上下边缘 15% 为死区，左右 25% 为翻页区域，中心区域为菜单切换区域
 
     private func tapZones(geometry: GeometryProxy) -> some View {
-        HStack(spacing: 0) {
-            // 左侧
+        let w = geometry.size.width
+        let h = geometry.size.height
+        let deadH = h * tapZoneVerticalDeadZone
+        let sideW = w * tapZoneRatio
+        let centerW = w - sideW * 2
+        let centerH = h - deadH * 2
+
+        return ZStack {
+            // 上边缘死区 — 不响应点击
             Color.clear
-                .frame(width: geometry.size.width * tapZoneRatio)
+                .frame(width: w, height: deadH)
+                .position(x: w / 2, y: deadH / 2)
+
+            // 下边缘死区 — 不响应点击
+            Color.clear
+                .frame(width: w, height: deadH)
+                .position(x: w / 2, y: h - deadH / 2)
+
+            // 左侧翻页区域 (中间高度区域)
+            Color.clear
+                .frame(width: sideW, height: centerH)
                 .contentShape(Rectangle())
+                .position(x: sideW / 2, y: h / 2)
                 .onTapGesture {
                     if readingDirection == .rightToLeft {
                         goToNextPage()
@@ -665,19 +686,22 @@ struct ImageReaderView: View {
                     }
                 }
 
-            // 中间
+            // 中央菜单区域
             Color.clear
+                .frame(width: centerW, height: centerH)
                 .contentShape(Rectangle())
+                .position(x: w / 2, y: h / 2)
                 .onTapGesture {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showOverlay.toggle()
                     }
                 }
 
-            // 右侧
+            // 右侧翻页区域 (中间高度区域)
             Color.clear
-                .frame(width: geometry.size.width * tapZoneRatio)
+                .frame(width: sideW, height: centerH)
                 .contentShape(Rectangle())
+                .position(x: w - sideW / 2, y: h / 2)
                 .onTapGesture {
                     if readingDirection == .rightToLeft {
                         goToPreviousPage()
@@ -686,6 +710,7 @@ struct ImageReaderView: View {
                     }
                 }
         }
+        .frame(width: w, height: h)
     }
 
     // MARK: - Overlay

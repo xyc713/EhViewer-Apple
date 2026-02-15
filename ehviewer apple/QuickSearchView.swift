@@ -91,6 +91,88 @@ struct QuickSearchView: View {
     }
 }
 
+// MARK: - Quick Search Drawer Content (对齐 Android QuickSearchScene / drawer_list.xml)
+
+struct QuickSearchDrawerContent: View {
+    @State private var vm = QuickSearchViewModel()
+    @Binding var selectedSearch: QuickSearchRecord?
+    let currentKeyword: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 顶部标题栏 (对齐 Android drawer header)
+            HStack {
+                Text("快速搜索")
+                    .font(.headline)
+                Spacer()
+                // 收藏当前搜索词 (对齐 Android: 抽屉顶部添加按钮)
+                Button {
+                    let record = QuickSearchRecord(
+                        name: nil,
+                        mode: 0,
+                        category: 0,
+                        keyword: currentKeyword
+                    )
+                    vm.addSearch(record)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                }
+                .disabled(currentKeyword.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            // 搜索词列表
+            if vm.searches.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                    Text("暂无快速搜索")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Text("点击 + 收藏当前搜索词")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                List {
+                    ForEach(vm.searches, id: \.id) { search in
+                        Button {
+                            selectedSearch = search
+                            onDismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(search.name ?? search.keyword ?? "未命名")
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                if let keyword = search.keyword, !keyword.isEmpty,
+                                   search.name != nil {
+                                    Text(keyword)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete { vm.delete(at: $0) }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .task { vm.loadSearches() }
+    }
+}
+
 // MARK: - Add Quick Search Sheet
 
 struct AddQuickSearchSheet: View {

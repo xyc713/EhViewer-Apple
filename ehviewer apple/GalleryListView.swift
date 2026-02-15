@@ -53,9 +53,13 @@ struct GalleryListView: View {
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     /// 是否使用宽屏双栏布局 (考虑用户设置: wideScreenListMode)
+    /// iPhone 手机端始终使用单栏布局，仅 iPad 在 regular 宽度时才启用双栏
     private var isRegularWidth: Bool {
-        horizontalSizeClass == .regular && AppSettings.shared.wideScreenListMode == 0
+        // 在 iPhone 上始终为 false (避免大屏 iPhone 横屏时误触发双栏)
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        return horizontalSizeClass == .regular && AppSettings.shared.wideScreenListMode == 0
     }
     #else
     /// macOS 也支持全宽单列表模式
@@ -91,6 +95,14 @@ struct GalleryListView: View {
         self.mode = mode
         self.externalSelection = selection
         self.favSearchKeyword = searchKeyword
+    }
+
+    /// 当前实际运行模式 — 如果搜索框有内容，则为搜索模式 (对齐 Android: 搜索后跳页/翻页保持在搜索结果中)
+    private var effectiveMode: ListMode {
+        if !viewModel.searchText.isEmpty {
+            return .search(keyword: viewModel.searchText)
+        }
+        return mode
     }
 
 
@@ -149,8 +161,9 @@ struct GalleryListView: View {
         }
         .onChange(of: showAdvancedSearch) { _, isShowing in
             if !isShowing {
-                // 高级搜索面板关闭时，自动应用设置重新搜索 (对齐 Android onApplySearch)
-                viewModel.applyAdvancedSettings(advancedSearch, initialMode: mode)
+                // 高级搜索面板关闭时，静默保存参数到 ViewModel (不自动触发搜索)
+                // 用户提交搜索或点击搜索按钮时才会使用这些参数
+                viewModel.syncAdvancedSettings(advancedSearch)
             }
         }
     }
@@ -175,11 +188,11 @@ struct GalleryListView: View {
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 8) {
-                        // 高级搜索 (对齐 Android AdvanceSearchTable)
+                        // 高级搜索 (对齐 Android AddDeleteDrawable: + icon)
                         Button {
                             showAdvancedSearch = true
                         } label: {
-                            Image(systemName: advancedSearch.isEnabled ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                            Image(systemName: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
                         }
 
                         Button {
@@ -194,12 +207,18 @@ struct GalleryListView: View {
                         } label: {
                             Image(systemName: "arrow.up.and.down.text.horizontal")
                         }
-                        .disabled(viewModel.totalPages <= 1)
+                        .disabled(viewModel.galleries.isEmpty)
                     }
                 }
             }
             .searchable(text: $viewModel.searchText, prompt: "搜索画廊...")
             .searchSuggestions {
+                // 高级搜索快捷入口 (对齐 Android: 搜索框输入内容后右侧显示 + 按钮)
+                Button {
+                    showAdvancedSearch = true
+                } label: {
+                    Label("高级搜索筛选", systemImage: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
+                }
                 if !viewModel.suggestions.isEmpty {
                     searchSuggestionsContent
                 }
@@ -210,8 +229,12 @@ struct GalleryListView: View {
             .onSubmit(of: .search) {
                 viewModel.searchWithAdvanced(advancedSearch)
             }
-            .sheet(isPresented: $showQuickSearch) {
-                QuickSearchView(selectedSearch: $selectedQuickSearch)
+            .rightDrawer(isOpen: $showQuickSearch) {
+                QuickSearchDrawerContent(
+                    selectedSearch: $selectedQuickSearch,
+                    currentKeyword: viewModel.searchText,
+                    onDismiss: { showQuickSearch = false }
+                )
             }
             .sheet(isPresented: $showAdvancedSearch) {
                 AdvancedSearchView(state: advancedSearch)
@@ -238,13 +261,14 @@ struct GalleryListView: View {
                 viewModel.goToPageInput = ""
             }
             Button("确定") {
-                if let page = Int(viewModel.goToPageInput), page >= 1 && page <= viewModel.totalPages {
-                    viewModel.goToPage(page - 1, mode: mode)
+                if let page = Int(viewModel.goToPageInput), page >= 1,
+                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
+                    viewModel.goToPage(page - 1, mode: effectiveMode)
                 }
                 viewModel.goToPageInput = ""
             }
         } message: {
-            Text("输入页码 (1-\(viewModel.totalPages))")
+            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
         }
     }
 
@@ -270,7 +294,7 @@ struct GalleryListView: View {
                     Button {
                         showAdvancedSearch = true
                     } label: {
-                        Image(systemName: advancedSearch.isEnabled ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Image(systemName: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
                     }
 
                     Button {
@@ -284,12 +308,18 @@ struct GalleryListView: View {
                     } label: {
                         Image(systemName: "arrow.up.and.down.text.horizontal")
                     }
-                    .disabled(viewModel.totalPages <= 1)
+                    .disabled(viewModel.galleries.isEmpty)
                 }
             }
         }
         .searchable(text: $viewModel.searchText, prompt: "搜索画廊...")
         .searchSuggestions {
+            // 高级搜索快捷入口 (对齐 Android: 搜索框输入内容后右侧显示 + 按钮)
+            Button {
+                showAdvancedSearch = true
+            } label: {
+                Label("高级搜索筛选", systemImage: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
+            }
             if !viewModel.suggestions.isEmpty {
                 searchSuggestionsContent
             }
@@ -300,8 +330,12 @@ struct GalleryListView: View {
         .onSubmit(of: .search) {
             viewModel.searchWithAdvanced(advancedSearch)
         }
-        .sheet(isPresented: $showQuickSearch) {
-            QuickSearchView(selectedSearch: $selectedQuickSearch)
+        .rightDrawer(isOpen: $showQuickSearch) {
+            QuickSearchDrawerContent(
+                selectedSearch: $selectedQuickSearch,
+                currentKeyword: viewModel.searchText,
+                onDismiss: { showQuickSearch = false }
+            )
         }
         .sheet(isPresented: $showAdvancedSearch) {
             AdvancedSearchView(state: advancedSearch)
@@ -326,19 +360,20 @@ struct GalleryListView: View {
                 viewModel.goToPageInput = ""
             }
             Button("确定") {
-                if let page = Int(viewModel.goToPageInput), page >= 1 && page <= viewModel.totalPages {
-                    viewModel.goToPage(page - 1, mode: mode)
+                if let page = Int(viewModel.goToPageInput), page >= 1,
+                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
+                    viewModel.goToPage(page - 1, mode: effectiveMode)
                 }
                 viewModel.goToPageInput = ""
             }
         } message: {
-            Text("输入页码 (1-\(viewModel.totalPages))")
+            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
         }
     }
 
     private var navigationTitle: String {
         switch mode {
-        case .home: return "E-Hentai"
+        case .home: return AppSettings.shared.gallerySite == .exHentai ? "ExHentai" : "E-Hentai"
         case .popular: return "热门"
         case .search(let kw): return "搜索: \(kw)"
         case .tag: return "标签搜索"  // 对齐 Android: 标签关键字显示在搜索框而非标题
@@ -365,13 +400,13 @@ struct GalleryListView: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                         .task {
-                            await viewModel.loadMore(mode: mode)
+                            await viewModel.loadMore(mode: effectiveMode)
                         }
                 }
             }
         }
         .refreshable {
-            viewModel.refresh(mode: mode)
+            viewModel.refresh(mode: effectiveMode)
         }
         .navigationDestination(for: GalleryInfo.self) { gallery in
             GalleryDetailView(gallery: gallery)
@@ -409,13 +444,13 @@ struct GalleryListView: View {
                             .frame(maxWidth: .infinity)
                             .padding()
                             .task {
-                                await viewModel.loadMore(mode: mode)
+                                await viewModel.loadMore(mode: effectiveMode)
                             }
                     }
                 }
                 .listStyle(.sidebar)
                 .refreshable {
-                    viewModel.refresh(mode: mode)
+                    viewModel.refresh(mode: effectiveMode)
                 }
             }
         }
@@ -425,7 +460,7 @@ struct GalleryListView: View {
                     Button {
                         showAdvancedSearch = true
                     } label: {
-                        Image(systemName: advancedSearch.isEnabled ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Image(systemName: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
                     }
 
                     Button {
@@ -440,12 +475,18 @@ struct GalleryListView: View {
                     } label: {
                         Image(systemName: "arrow.up.and.down.text.horizontal")
                     }
-                    .disabled(viewModel.totalPages <= 1)
+                    .disabled(viewModel.galleries.isEmpty)
                 }
             }
         }
         .searchable(text: $viewModel.searchText, prompt: "搜索画廊...")
         .searchSuggestions {
+            // 高级搜索快捷入口 (对齐 Android: 搜索框输入内容后右侧显示 + 按钮)
+            Button {
+                showAdvancedSearch = true
+            } label: {
+                Label("高级搜索筛选", systemImage: advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
+            }
             if !viewModel.suggestions.isEmpty {
                 searchSuggestionsContent
             }
@@ -456,8 +497,12 @@ struct GalleryListView: View {
         .onSubmit(of: .search) {
             viewModel.searchWithAdvanced(advancedSearch)
         }
-        .sheet(isPresented: $showQuickSearch) {
-            QuickSearchView(selectedSearch: $selectedQuickSearch)
+        .rightDrawer(isOpen: $showQuickSearch) {
+            QuickSearchDrawerContent(
+                selectedSearch: $selectedQuickSearch,
+                currentKeyword: viewModel.searchText,
+                onDismiss: { showQuickSearch = false }
+            )
         }
         .sheet(isPresented: $showAdvancedSearch) {
             AdvancedSearchView(state: advancedSearch)
@@ -467,6 +512,24 @@ struct GalleryListView: View {
                 viewModel.applyQuickSearch(search)
                 selectedQuickSearch = nil
             }
+        }
+        .alert("跳页", isPresented: $viewModel.showGoToDialog) {
+            TextField("页码", text: $viewModel.goToPageInput)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+            Button("取消", role: .cancel) {
+                viewModel.goToPageInput = ""
+            }
+            Button("确定") {
+                if let page = Int(viewModel.goToPageInput), page >= 1,
+                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
+                    viewModel.goToPage(page - 1, mode: effectiveMode)
+                }
+                viewModel.goToPageInput = ""
+            }
+        } message: {
+            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
         }
     }
 
@@ -521,14 +584,41 @@ struct GalleryListView: View {
             }
 
             Button("重试") {
-                viewModel.loadGalleries(mode: mode)
+                viewModel.loadGalleries(mode: effectiveMode)
             }
             .buttonStyle(.bordered)
         }
     }
 }
 
-// MARK: - Gallery Row
+// MARK: - 星级评分视图 (对齐 Android SimpleRatingView)
+
+struct SimpleRatingView: View {
+    let rating: Float
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(0..<5, id: \.self) { index in
+                starImage(for: index)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func starImage(for index: Int) -> Image {
+        let threshold = Float(index) + 1
+        if rating >= threshold {
+            return Image(systemName: "star.fill")
+        } else if rating >= threshold - 0.5 {
+            return Image(systemName: "star.leadinghalf.filled")
+        } else {
+            return Image(systemName: "star")
+        }
+    }
+}
+
+// MARK: - Gallery Row (对齐 Android item_gallery_list.xml 布局)
 
 struct GalleryRow: View {
     let gallery: GalleryInfo
@@ -536,8 +626,8 @@ struct GalleryRow: View {
     var onDownload: ((GalleryInfo) -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
-            // 缩略图
+        HStack(alignment: .top, spacing: 12) {
+            // 缩略图 (对齐 Android @id/thumb)
             CachedAsyncImage(url: URL(string: gallery.thumb ?? "")) { image in
                 image
                     .resizable()
@@ -548,59 +638,73 @@ struct GalleryRow: View {
             .frame(width: 76, height: 106)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // 信息
-            VStack(alignment: .leading, spacing: 4) {
-                // 分类
-                Text(gallery.category.name)
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(gallery.category.color)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                // 标题 (根据设置显示日文/中文或英文标题)
+            // 信息区 (对齐 Android RelativeLayout 右侧元素)
+            VStack(alignment: .leading, spacing: 0) {
+                // 标题 (对齐 Android @id/title: alignParentTop, toRightOf thumb)
                 Text(gallery.suitableTitle(preferJpn: AppSettings.shared.showJpnTitle))
                     .font(.subheadline)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.primary)
 
-                Spacer(minLength: 0)
+                // 上传者 (对齐 Android @id/uploader: below title)
+                if let uploader = gallery.uploader {
+                    Text(uploader)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.top, 2)
+                }
 
-                // 底部信息
-                HStack(spacing: 8) {
-                    // 评分
-                    HStack(spacing: 2) {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                        Text(String(format: "%.1f", gallery.rating))
-                            .font(.caption)
-                    }
-                    .fixedSize()
+                Spacer(minLength: 4)
 
-                    // 页数
-                    HStack(spacing: 2) {
-                        Image(systemName: "doc")
-                            .font(.caption2)
-                        Text("\(gallery.pages)P")
-                            .font(.caption)
-                    }
-                    .fixedSize()
+                // 底部区域 — 评分 + 图标行 (对齐 Android rating + LinearLayout)
+                HStack {
+                    // 评分星星 (对齐 Android SimpleRatingView: above category)
+                    SimpleRatingView(rating: gallery.rating)
 
                     Spacer(minLength: 4)
 
-                    // 上传者
-                    if let uploader = gallery.uploader {
-                        Text(uploader)
+                    // 右侧图标 (对齐 Android LinearLayout: downloaded, favourited, simple_language, pages)
+                    HStack(spacing: 6) {
+                        if gallery.favoriteSlot >= 0 {
+                            Image(systemName: "heart.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                        if let lang = gallery.simpleLanguage, !lang.isEmpty {
+                            Text(lang)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("\(gallery.pages)P")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // 分类 + 发布时间 (对齐 Android category + posted)
+                HStack {
+                    // 分类标签 (对齐 Android @id/category: alignBottom thumb)
+                    Text(gallery.category.name)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(gallery.category.color)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Spacer(minLength: 4)
+
+                    // 发布时间 (对齐 Android @id/posted: alignBottom thumb, alignParentRight)
+                    if let posted = gallery.posted, !posted.isEmpty {
+                        Text(posted)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .truncationMode(.tail)
                     }
                 }
-                .foregroundStyle(.secondary)
+                .padding(.top, 4)
             }
         }
         .padding(.horizontal, 16)
@@ -787,12 +891,7 @@ class GalleryListViewModel {
 
     /// 高级搜索面板关闭后自动应用设置 (对齐 Android GalleryListScene.onApplySearch)
     func applyAdvancedSettings(_ state: AdvancedSearchState, initialMode: GalleryListView.ListMode) {
-        currentCategory = state.categoryValue
-        currentSearchMode = state.searchMode
-        currentAdvanceSearch = state.advanceSearchValue
-        currentMinRating = state.minRatingValue
-        currentPageFrom = state.pageFromValue
-        currentPageTo = state.pageToValue
+        syncAdvancedSettings(state)
 
         // 清除缓存，强制使用新参数重新加载
         if let key = currentCacheKey {
@@ -821,6 +920,16 @@ class GalleryListViewModel {
                 await fetchPage(mode: .home, page: 0)
             }
         }
+    }
+
+    /// 静默同步高级搜索参数到 ViewModel (不触发搜索)
+    func syncAdvancedSettings(_ state: AdvancedSearchState) {
+        currentCategory = state.categoryValue
+        currentSearchMode = state.searchMode
+        currentAdvanceSearch = state.advanceSearchValue
+        currentMinRating = state.minRatingValue
+        currentPageFrom = state.pageFromValue
+        currentPageTo = state.pageToValue
     }
 
     func applyQuickSearch(_ search: QuickSearchRecord) {
@@ -1012,6 +1121,69 @@ extension NSColor {
     static var secondarySystemBackground: NSColor { .controlBackgroundColor }
 }
 #endif
+
+// MARK: - Right Drawer Overlay (对齐 Android EhDrawerLayout 右侧抽屉)
+
+struct RightDrawerOverlay<DrawerContent: View>: View {
+    @Binding var isOpen: Bool
+    @ViewBuilder let drawerContent: () -> DrawerContent
+
+    private let drawerWidth: CGFloat = 280
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // 半透明遮罩
+            Color.black
+                .opacity(isOpen ? 0.3 : 0)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isOpen = false
+                    }
+                }
+                .allowsHitTesting(isOpen)
+
+            // 右侧边缘滑动感应区 (关闭时: 从右向左滑动打开抽屉)
+            if !isOpen {
+                HStack {
+                    Spacer()
+                    Color.clear
+                        .frame(width: 20)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 10)
+                                .onEnded { value in
+                                    if value.translation.width < -50 {
+                                        withAnimation(.easeInOut(duration: 0.25)) {
+                                            isOpen = true
+                                        }
+                                    }
+                                }
+                        )
+                }
+            }
+
+            // 抽屉面板
+            drawerContent()
+                .frame(width: drawerWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(.regularMaterial)
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12))
+                .shadow(color: .black.opacity(isOpen ? 0.15 : 0), radius: 8, x: -3)
+                .offset(x: isOpen ? 0 : drawerWidth)
+        }
+        .animation(.easeInOut(duration: 0.25), value: isOpen)
+    }
+}
+
+extension View {
+    /// 右侧抽屉修饰器 (对齐 Android EhDrawerLayout)
+    func rightDrawer<Content: View>(isOpen: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
+        self.overlay {
+            RightDrawerOverlay(isOpen: isOpen, drawerContent: content)
+        }
+    }
+}
 
 #Preview {
     GalleryListView(mode: .home)
