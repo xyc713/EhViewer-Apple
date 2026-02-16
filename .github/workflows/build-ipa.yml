@@ -17,12 +17,18 @@ jobs:
       
     - name: Show environment info
       run: |
+        pwd
+        ls -la
+        echo "---"
+        ls -la "ehviewer apple" 2>/dev/null || echo "ehviewer apple dir not found"
+        echo "---"
         xcodebuild -version
         swift --version
         
     - name: Resolve Swift Packages
       run: |
         cd "ehviewer apple"
+        ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj found"
         xcodebuild -resolvePackageDependencies -project "ehviewer apple.xcodeproj"
         
     - name: Build Release
