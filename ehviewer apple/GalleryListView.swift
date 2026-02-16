@@ -10,7 +10,6 @@ import EhModels
 import EhAPI
 import EhSettings
 import EhDatabase
-import EhDownload
 #if os(macOS)
 import AppKit
 #else
@@ -181,7 +180,7 @@ struct GalleryListView: View {
                 } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
                     errorView
                 } else {
-                    galleryGrid
+                    galleryList
                 }
             }
             .navigationTitle(navigationTitle)
@@ -274,7 +273,7 @@ struct GalleryListView: View {
             } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
                 errorView
             } else {
-                galleryGrid
+                galleryList
             }
         }
         .navigationTitle(navigationTitle)
@@ -374,17 +373,17 @@ struct GalleryListView: View {
         }
     }
 
-    /// 自适应宫格列 — iPhone 2列, iPad 3-4列, Mac 5-6列
-    private static let gridColumns = [GridItem(.adaptive(minimum: 150, maximum: 200))]
-
-    private var galleryGrid: some View {
+    private var galleryList: some View {
         ScrollView {
-            LazyVGrid(columns: Self.gridColumns, spacing: 12) {
+            LazyVStack(spacing: 0) {
                 ForEach(viewModel.galleries, id: \.gid) { gallery in
                     NavigationLink(value: gallery) {
-                        GalleryCard(gallery: gallery)
+                        GalleryRow(gallery: gallery)
                     }
                     .buttonStyle(.plain)
+
+                    Divider()
+                        .padding(.leading, 88)
                 }
 
                 // 加载更多
@@ -397,8 +396,6 @@ struct GalleryListView: View {
                         }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
         }
         .refreshable {
             await viewModel.refreshAsync(mode: effectiveMode)
@@ -428,27 +425,22 @@ struct GalleryListView: View {
             } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
                 errorView
             } else {
-                ScrollView {
-                    LazyVGrid(columns: Self.gridColumns, spacing: 12) {
-                        ForEach(viewModel.galleries, id: \.gid) { gallery in
-                            GalleryCard(gallery: gallery, isSelected: selectionBinding.wrappedValue?.gid == gallery.gid)
-                                .onTapGesture {
-                                    selectionBinding.wrappedValue = gallery
-                                }
-                        }
-
-                        if viewModel.hasMore {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .task {
-                                    await viewModel.loadMore(mode: effectiveMode)
-                                }
-                        }
+                List(selection: selectionBinding) {
+                    ForEach(viewModel.galleries, id: \.gid) { gallery in
+                        GalleryRow(gallery: gallery)
+                            .tag(gallery)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
+
+                    if viewModel.hasMore {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .task {
+                                await viewModel.loadMore(mode: effectiveMode)
+                            }
+                    }
                 }
+                .listStyle(.sidebar)
                 .refreshable {
                     await viewModel.refreshAsync(mode: effectiveMode)
                 }
@@ -919,121 +911,6 @@ struct GalleryRow: View {
                 onDownload?(gallery)
             } label: {
                 Label("下载", systemImage: "arrow.down.circle")
-            }
-
-            Divider()
-
-            // 复制链接
-            Button {
-                let url = "https://e-hentai.org/g/\(gallery.gid)/\(gallery.token)/"
-                #if os(macOS)
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url, forType: .string)
-                #else
-                UIPasteboard.general.string = url
-                #endif
-            } label: {
-                Label("复制链接", systemImage: "doc.on.doc")
-            }
-
-            // 分享 (仅 iOS)
-            #if os(iOS)
-            ShareLink(item: URL(string: "https://e-hentai.org/g/\(gallery.gid)/\(gallery.token)/")!) {
-                Label("分享", systemImage: "square.and.arrow.up")
-            }
-            #endif
-        }
-    }
-}
-
-// MARK: - 宫格卡片视图 (自适应网格)
-
-struct GalleryCard: View {
-    let gallery: GalleryInfo
-    var isSelected: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // 封面 + 分类标签
-            ZStack(alignment: .bottomLeading) {
-                CachedAsyncImage(url: URL(string: gallery.thumb ?? "")) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.quaternary)
-                        .overlay {
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundStyle(.tertiary)
-                        }
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(2/3, contentMode: .fill)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                // 分类标签
-                Text(gallery.category.name)
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(gallery.category.color)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .padding(6)
-            }
-
-            // 标题
-            Text(gallery.suitableTitle(preferJpn: AppSettings.shared.showJpnTitle))
-                .font(.caption)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(.primary)
-
-            // 底部信息: 评分 + 收藏 + 页数
-            HStack(spacing: 2) {
-                SimpleRatingView(rating: gallery.rating)
-                Spacer()
-                if gallery.favoriteSlot >= 0 {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.red)
-                }
-                Text("\(gallery.pages)P")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(6)
-        .background {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-        }
-        .contentShape(Rectangle())
-        .contextMenu {
-            // 下载
-            Button {
-                Task {
-                    await DownloadManager.shared.startDownload(gallery: gallery)
-                }
-            } label: {
-                Label("下载", systemImage: "arrow.down.circle")
-            }
-
-            // 收藏
-            Button {
-                let slot = max(0, min(9, AppSettings.shared.defaultFavSlot))
-                Task {
-                    try? await EhAPI.shared.addFavorites(gid: gallery.gid, token: gallery.token, dstCat: slot)
-                }
-            } label: {
-                Label("收藏", systemImage: gallery.favoriteSlot >= 0 ? "heart.fill" : "heart")
             }
 
             Divider()
