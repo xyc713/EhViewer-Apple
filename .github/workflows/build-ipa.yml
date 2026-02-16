@@ -27,20 +27,19 @@ jobs:
         
     - name: Resolve Swift Packages
       run: |
-        cd "ehviewer apple"
-        ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj found"
+        ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj in root"
+        ls -la "ehviewer apple"/*.xcodeproj 2>/dev/null || echo "No xcodeproj in subdir"
         xcodebuild -resolvePackageDependencies -project "ehviewer apple.xcodeproj"
         
     - name: Build Release
       run: |
-        cd "ehviewer apple"
         xcodebuild \
           -project "ehviewer apple.xcodeproj" \
           -scheme "ehviewer apple" \
           -configuration Release \
           -sdk iphoneos \
           -destination "generic/platform=iOS" \
-          -derivedDataPath ../build \
+          -derivedDataPath build \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
