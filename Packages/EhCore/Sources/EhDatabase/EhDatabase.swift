@@ -582,11 +582,17 @@ public struct DownloadRecord: Codable, FetchableRecord, PersistableRecord, Senda
     public var date: Date
     public var label: String?
 
-    public init(gid: Int64, token: String, title: String, category: Int = 0,
-                pages: Int = 0, state: Int = 0, date: Date = .init()) {
+    public init(gid: Int64, token: String, title: String, titleJpn: String? = nil,
+                thumb: String? = nil, category: Int = 0, posted: String? = nil,
+                uploader: String? = nil, rating: Float = 0, simpleLanguage: String? = nil,
+                pages: Int = 0, state: Int = 0, label: String? = nil, date: Date = .init()) {
         self.gid = gid; self.token = token; self.title = title
-        self.category = category; self.pages = pages
-        self.state = state; self.legacy = 0; self.date = date; self.rating = 0
+        self.titleJpn = titleJpn; self.thumb = thumb
+        self.category = category; self.posted = posted
+        self.uploader = uploader; self.rating = rating
+        self.simpleLanguage = simpleLanguage; self.pages = pages
+        self.state = state; self.legacy = 0; self.date = date
+        self.label = label
     }
 }
 
@@ -607,11 +613,16 @@ public struct HistoryRecord: Codable, FetchableRecord, PersistableRecord, Sendab
     public var mode: Int
     public var date: Date
 
-    public init(gid: Int64, token: String, title: String, category: Int = 0,
+    public init(gid: Int64, token: String, title: String, titleJpn: String? = nil,
+                thumb: String? = nil, category: Int = 0, posted: String? = nil,
+                uploader: String? = nil, rating: Float = 0, simpleLanguage: String? = nil,
                 pages: Int = 0, mode: Int = 0, date: Date = .init()) {
         self.gid = gid; self.token = token; self.title = title
-        self.category = category; self.pages = pages
-        self.mode = mode; self.date = date; self.rating = 0
+        self.titleJpn = titleJpn; self.thumb = thumb
+        self.category = category; self.posted = posted
+        self.uploader = uploader; self.rating = rating
+        self.simpleLanguage = simpleLanguage; self.pages = pages
+        self.mode = mode; self.date = date
     }
 }
 

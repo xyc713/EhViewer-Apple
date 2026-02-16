@@ -35,7 +35,7 @@ struct GalleryListView: View {
     @State private var selectedGallery: GalleryInfo?
     @FocusState private var isSearchFocused: Bool
     /// 跳页模式切换 (对齐 Android JumpDateSelector: DATE_PICKER_TYPE / DATE_NODE_TYPE)
-    @State private var jumpUseQuickNode = false
+    @State private var jumpUseQuickNode = true
 
     /// 标签导航路径 — iPad 双栏布局中支持标签推入左侧
     @State private var sidebarPath = NavigationPath()
@@ -175,14 +175,19 @@ struct GalleryListView: View {
     // iPhone 布局
     private var compactContent: some View {
         NavigationStack {
-            Group {
-                if viewModel.isLoading && viewModel.galleries.isEmpty {
-                    ProgressView("加载中...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
-                    errorView
-                } else {
-                    galleryList
+            VStack(spacing: 0) {
+                // 搜索栏 (全宽，置于内容顶部)
+                searchBarView
+
+                Group {
+                    if viewModel.isLoading && viewModel.galleries.isEmpty {
+                        ProgressView("加载中...")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
+                        errorView
+                    } else {
+                        galleryList
+                    }
                 }
             }
             .navigationTitle(navigationTitle)
@@ -190,7 +195,18 @@ struct GalleryListView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar { galleryToolbar }
-            .overlay(alignment: .top) { searchSuggestionsOverlay }
+            #if os(iOS)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { isSearchFocused = false }
+                }
+            }
+            #endif
+            .overlay(alignment: .top) {
+                searchSuggestionsOverlay
+                    .padding(.top, 44) // 搜索建议浮层偏移到搜索栏下方
+            }
             .rightDrawer(isOpen: $showQuickSearch) {
                 QuickSearchDrawerContent(
                     selectedSearch: $selectedQuickSearch,
@@ -236,14 +252,19 @@ struct GalleryListView: View {
 
     /// 被推入导航栈时的内容 — 不包装 NavigationStack，避免嵌套
     private var pushedContent: some View {
-        Group {
-            if viewModel.isLoading && viewModel.galleries.isEmpty {
-                ProgressView("加载中...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
-                errorView
-            } else {
-                galleryList
+        VStack(spacing: 0) {
+            // 搜索栏 (全宽，置于内容顶部)
+            searchBarView
+
+            Group {
+                if viewModel.isLoading && viewModel.galleries.isEmpty {
+                    ProgressView("加载中...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
+                    errorView
+                } else {
+                    galleryList
+                }
             }
         }
         .navigationTitle(navigationTitle)
@@ -251,7 +272,18 @@ struct GalleryListView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar { galleryToolbar }
-        .overlay(alignment: .top) { searchSuggestionsOverlay }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { isSearchFocused = false }
+            }
+        }
+        #endif
+        .overlay(alignment: .top) {
+            searchSuggestionsOverlay
+                .padding(.top, 44)
+        }
         .rightDrawer(isOpen: $showQuickSearch) {
             QuickSearchDrawerContent(
                 selectedSearch: $selectedQuickSearch,
@@ -305,31 +337,49 @@ struct GalleryListView: View {
     }
 
     private var galleryList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(viewModel.galleries, id: \.gid) { gallery in
-                    NavigationLink(value: gallery) {
-                        GalleryRow(gallery: gallery)
+        List {
+            ForEach(viewModel.galleries, id: \.gid) { gallery in
+                NavigationLink(value: gallery) {
+                    GalleryRow(gallery: gallery)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    // 下载 (对齐 Android onItemLongClick: Download)
+                    Button {
+                        Task { await GalleryActionService.shared.startDownload(gallery: gallery) }
+                    } label: {
+                        Label("下载", systemImage: "arrow.down.circle")
                     }
-                    .buttonStyle(.plain)
+                    .tint(.blue)
 
-                    Divider()
-                        .padding(.leading, 88)
+                    // 收藏 (对齐 Android onItemLongClick: Add to Favorites)
+                    Button {
+                        Task { await GalleryActionService.shared.quickFavorite(gallery: gallery) }
+                    } label: {
+                        Label(gallery.favoriteSlot >= 0 ? "取消收藏" : "收藏", systemImage: gallery.favoriteSlot >= 0 ? "heart.slash" : "heart")
+                    }
+                    .tint(gallery.favoriteSlot >= 0 ? .gray : .red)
                 }
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+            }
 
-                // 加载更多
-                if viewModel.hasMore {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .task {
-                            await viewModel.loadMore(mode: effectiveMode)
-                        }
-                }
+            // 加载更多
+            if viewModel.hasMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .task {
+                        await viewModel.loadMore(mode: effectiveMode)
+                    }
+                    .listRowSeparator(.hidden)
             }
         }
+        .listStyle(.plain)
         .refreshable {
             await viewModel.refreshAsync(mode: effectiveMode)
+        }
+        .onTapGesture {
+            isSearchFocused = false
         }
         .navigationDestination(for: GalleryInfo.self) { gallery in
             GalleryDetailView(gallery: gallery)
@@ -349,36 +399,52 @@ struct GalleryListView: View {
 
     // iPad/Mac 侧边栏内容
     private var sidebarContent: some View {
-        Group {
-            if viewModel.isLoading && viewModel.galleries.isEmpty {
-                ProgressView("加载中...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
-                errorView
-            } else {
-                List(selection: selectionBinding) {
-                    ForEach(viewModel.galleries, id: \.gid) { gallery in
-                        GalleryRow(gallery: gallery)
-                            .tag(gallery)
-                    }
+        VStack(spacing: 0) {
+            // 搜索栏 (全宽，置于内容顶部)
+            searchBarView
 
-                    if viewModel.hasMore {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .task {
-                                await viewModel.loadMore(mode: effectiveMode)
-                            }
+            Group {
+                if viewModel.isLoading && viewModel.galleries.isEmpty {
+                    ProgressView("加载中...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
+                    errorView
+                } else {
+                    List(selection: selectionBinding) {
+                        ForEach(viewModel.galleries, id: \.gid) { gallery in
+                            GalleryRow(gallery: gallery)
+                                .tag(gallery)
+                        }
+
+                        if viewModel.hasMore {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .task {
+                                    await viewModel.loadMore(mode: effectiveMode)
+                                }
+                        }
                     }
-                }
-                .listStyle(.sidebar)
-                .refreshable {
-                    await viewModel.refreshAsync(mode: effectiveMode)
+                    .listStyle(.sidebar)
+                    .refreshable {
+                        await viewModel.refreshAsync(mode: effectiveMode)
+                    }
                 }
             }
         }
         .toolbar { galleryToolbar }
-        .overlay(alignment: .top) { searchSuggestionsOverlay }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { isSearchFocused = false }
+            }
+        }
+        #endif
+        .overlay(alignment: .top) {
+            searchSuggestionsOverlay
+                .padding(.top, 44)
+        }
         .rightDrawer(isOpen: $showQuickSearch) {
             QuickSearchDrawerContent(
                 selectedSearch: $selectedQuickSearch,
@@ -416,50 +482,55 @@ struct GalleryListView: View {
         }
     }
 
-    // MARK: - 统一工具栏 (对齐 Android SearchBar + FAB 行为)
+    // MARK: - 搜索栏 (对齐 Android SearchBar，从 toolbar 移到 body header 以获得完整宽度)
+
+    private var searchBarView: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .font(.subheadline)
+
+            TextField("搜索", text: $viewModel.searchText)
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+                .onSubmit {
+                    isSearchFocused = false
+                    viewModel.searchWithAdvanced(advancedSearch)
+                }
+                .onChange(of: viewModel.searchText) { _, _ in
+                    viewModel.updateSuggestions()
+                }
+                #if os(iOS)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                #endif
+
+            // 右侧图标 (对齐 Android AddDeleteDrawable)
+            Button {
+                if viewModel.searchText.isEmpty {
+                    showAdvancedSearch = true
+                } else {
+                    viewModel.searchText = ""
+                }
+            } label: {
+                Image(systemName: viewModel.searchText.isEmpty
+                      ? (advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
+                      : "xmark.circle.fill")
+                    .foregroundStyle(viewModel.searchText.isEmpty ? .primary : .secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - 统一工具栏 (对齐 Android FAB secondaryButtons)
 
     @ToolbarContentBuilder
     private var galleryToolbar: some ToolbarContent {
-        // 搜索框 (对齐 Android SearchBar)
-        ToolbarItem(placement: .principal) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-
-                TextField("搜索", text: $viewModel.searchText)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFocused)
-                    .onSubmit {
-                        isSearchFocused = false
-                        viewModel.searchWithAdvanced(advancedSearch)
-                    }
-                    .onChange(of: viewModel.searchText) { _, _ in
-                        viewModel.updateSuggestions()
-                    }
-
-                // 右侧图标 (对齐 Android AddDeleteDrawable)
-                // 搜索框为空: + (打开高级搜索) — 对齐 Android STATE_NORMAL → mRightDrawable.setAdd
-                // 搜索框有内容: × (清除文本) — 对齐 Android STATE_SEARCH → mRightDrawable.setDelete
-                Button {
-                    if viewModel.searchText.isEmpty {
-                        showAdvancedSearch = true
-                    } else {
-                        viewModel.searchText = ""
-                    }
-                } label: {
-                    Image(systemName: viewModel.searchText.isEmpty
-                          ? (advancedSearch.isEnabled ? "plus.circle.fill" : "plus.circle")
-                          : "xmark.circle.fill")
-                        .foregroundStyle(viewModel.searchText.isEmpty ? .primary : .secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-        }
-
         // 其余按钮 (对齐 Android FAB secondaryButtons)
         ToolbarItem(placement: .automatic) {
             HStack(spacing: 4) {
@@ -594,102 +665,103 @@ struct GalleryListView: View {
 
     private var jumpSheet: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                // 模式切换 (对齐 Android JumpDateSelector 的 toggle 按钮)
-                Picker("跳页模式", selection: $jumpUseQuickNode) {
-                    Text("日期选择").tag(false)
-                    Text("快捷跳转").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 8)
+            ScrollView {
+                VStack(spacing: 16) {
+                    // 模式切换 (对齐 Android JumpDateSelector 的 toggle 按钮)
+                    Picker("跳页模式", selection: $jumpUseQuickNode) {
+                        Text("快捷跳转").tag(true)
+                        Text("日期选择").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
 
-                if jumpUseQuickNode {
-                    // 快捷节点 (对齐 Android JumpDateSelector RadioGroup: 1d/3d/1w/2w/1m/6m/1y/2y)
-                    VStack(spacing: 12) {
-                        Text("选择时间范围快速跳转")
+                    if jumpUseQuickNode {
+                        // 快捷节点 (对齐 Android JumpDateSelector RadioGroup)
+                        VStack(spacing: 12) {
+                            Text("选择时间范围快速跳转")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            LazyVGrid(columns: [
+                                GridItem(.flexible()),
+                                GridItem(.flexible()),
+                            ], spacing: 10) {
+                                ForEach(Self.jumpNodes, id: \.value) { node in
+                                    Button {
+                                        selectedJumpNode = node.value
+                                    } label: {
+                                        Text(node.label)
+                                            .font(.body)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                selectedJumpNode == node.value
+                                                    ? Color.accentColor.opacity(0.15)
+                                                    : Color.secondary.opacity(0.08)
+                                            )
+                                            .foregroundStyle(
+                                                selectedJumpNode == node.value
+                                                    ? Color.accentColor
+                                                    : .primary
+                                            )
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(
+                                                        selectedJumpNode == node.value
+                                                            ? Color.accentColor
+                                                            : Color.clear,
+                                                        lineWidth: 1.5
+                                                    )
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    } else {
+                        // 日期选择器 (对齐 Android JumpDateSelector DATE_PICKER_TYPE)
+                        Text("选择日期跳转到对应时间的画廊")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible()),
-                        ], spacing: 10) {
-                            ForEach(Self.jumpNodes, id: \.value) { node in
-                                Button {
-                                    selectedJumpNode = node.value
-                                } label: {
-                                    Text(node.label)
-                                        .font(.body)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            selectedJumpNode == node.value
-                                                ? Color.accentColor.opacity(0.15)
-                                                : Color.secondary.opacity(0.08)
-                                        )
-                                        .foregroundStyle(
-                                            selectedJumpNode == node.value
-                                                ? Color.accentColor
-                                                : .primary
-                                        )
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(
-                                                    selectedJumpNode == node.value
-                                                        ? Color.accentColor
-                                                        : Color.clear,
-                                                    lineWidth: 1.5
-                                                )
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                        DatePicker(
+                            "跳转日期",
+                            selection: $viewModel.jumpDate,
+                            in: ...Date(),
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
                         .padding(.horizontal)
                     }
-                } else {
-                    // 日期选择器 (对齐 Android JumpDateSelector DATE_PICKER_TYPE)
-                    Text("选择日期跳转到对应时间的画廊")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
 
-                    DatePicker(
-                        "跳转日期",
-                        selection: $viewModel.jumpDate,
-                        in: ...Date(),
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .padding(.horizontal)
-                }
-
-                // 前/后页快捷按钮 (仅收藏模式)
-                if viewModel.isFavoritesMode {
-                    HStack(spacing: 16) {
-                        if let prevHref = viewModel.prevHref {
-                            Button {
-                                viewModel.showJumpDialog = false
-                                viewModel.goToFavoritesHref(prevHref, mode: effectiveMode)
-                            } label: {
-                                Label("上一页", systemImage: "chevron.left")
+                    // 前/后页快捷按钮 (仅收藏模式)
+                    if viewModel.isFavoritesMode {
+                        HStack(spacing: 16) {
+                            if let prevHref = viewModel.prevHref {
+                                Button {
+                                    viewModel.showJumpDialog = false
+                                    viewModel.goToFavoritesHref(prevHref, mode: effectiveMode)
+                                } label: {
+                                    Label("上一页", systemImage: "chevron.left")
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
-                        }
-                        if let nextHref = viewModel.nextHref {
-                            Button {
-                                viewModel.showJumpDialog = false
-                                viewModel.goToFavoritesHref(nextHref, mode: effectiveMode)
-                            } label: {
-                                Label("下一页", systemImage: "chevron.right")
+                            if let nextHref = viewModel.nextHref {
+                                Button {
+                                    viewModel.showJumpDialog = false
+                                    viewModel.goToFavoritesHref(nextHref, mode: effectiveMode)
+                                } label: {
+                                    Label("下一页", systemImage: "chevron.right")
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
                         }
                     }
                 }
-
-                Spacer()
+                .padding(.bottom, 16)
             }
             .navigationTitle("跳页")
             #if os(iOS)

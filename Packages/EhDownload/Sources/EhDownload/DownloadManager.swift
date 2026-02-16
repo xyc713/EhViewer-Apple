@@ -92,7 +92,10 @@ public actor DownloadManager {
         // 持久化到数据库
         let record = DownloadRecord(
             gid: gallery.gid, token: gallery.token,
-            title: gallery.bestTitle, category: gallery.category.rawValue,
+            title: gallery.bestTitle, titleJpn: gallery.titleJpn,
+            thumb: gallery.thumb, category: gallery.category.rawValue,
+            posted: gallery.posted, uploader: gallery.uploader,
+            rating: gallery.rating, simpleLanguage: gallery.simpleLanguage,
             pages: gallery.pages, state: Self.stateWait, date: Date()
         )
         try? EhDatabase.shared.insertDownload(record)
