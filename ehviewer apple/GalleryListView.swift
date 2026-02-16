@@ -217,28 +217,9 @@ struct GalleryListView: View {
                 viewModel.loadGalleries(mode: mode)
             }
         }
-        // 跳页对话框 - 普通模式 (对齐 Android showPageJumpDialog)
-        .alert("跳页", isPresented: $viewModel.showGoToDialog) {
-            TextField("页码", text: $viewModel.goToPageInput)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-            Button("取消", role: .cancel) {
-                viewModel.goToPageInput = ""
-            }
-            Button("确定") {
-                if let page = Int(viewModel.goToPageInput), page >= 1,
-                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
-                    viewModel.goToPage(page - 1, mode: effectiveMode)
-                }
-                viewModel.goToPageInput = ""
-            }
-        } message: {
-            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
-        }
-        // 跳页对话框 - 收藏模式 (对齐 Android: 使用日期选择器跳转 seek=YYYY-MM-DD)
-        .sheet(isPresented: $viewModel.showFavJumpDialog) {
-            favoritesJumpSheet
+        // 跳页对话框 (对齐 Android GoToDialog: 日期选择器)
+        .sheet(isPresented: $viewModel.showJumpDialog) {
+            jumpSheet
         }
     }
 
@@ -288,23 +269,9 @@ struct GalleryListView: View {
                 viewModel.loadGalleries(mode: mode)
             }
         }
-        .alert("跳页", isPresented: $viewModel.showGoToDialog) {
-            TextField("页码", text: $viewModel.goToPageInput)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-            Button("取消", role: .cancel) {
-                viewModel.goToPageInput = ""
-            }
-            Button("确定") {
-                if let page = Int(viewModel.goToPageInput), page >= 1,
-                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
-                    viewModel.goToPage(page - 1, mode: effectiveMode)
-                }
-                viewModel.goToPageInput = ""
-            }
-        } message: {
-            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
+        // 跳页对话框 (对齐 Android GoToDialog: 日期选择器)
+        .sheet(isPresented: $viewModel.showJumpDialog) {
+            jumpSheet
         }
     }
 
@@ -416,26 +383,9 @@ struct GalleryListView: View {
                 selectedQuickSearch = nil
             }
         }
-        .alert("跳页", isPresented: $viewModel.showGoToDialog) {
-            TextField("页码", text: $viewModel.goToPageInput)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-            Button("取消", role: .cancel) {
-                viewModel.goToPageInput = ""
-            }
-            Button("确定") {
-                if let page = Int(viewModel.goToPageInput), page >= 1,
-                   viewModel.totalPages <= 0 || page <= viewModel.totalPages {
-                    viewModel.goToPage(page - 1, mode: effectiveMode)
-                }
-                viewModel.goToPageInput = ""
-            }
-        } message: {
-            Text(viewModel.totalPages > 1 ? "输入页码 (1-\(viewModel.totalPages))" : "输入目标页码")
-        }
-        .sheet(isPresented: $viewModel.showFavJumpDialog) {
-            favoritesJumpSheet
+        // 跳页对话框 (对齐 Android GoToDialog: 日期选择器)
+        .sheet(isPresented: $viewModel.showJumpDialog) {
+            jumpSheet
         }
     }
 
@@ -458,13 +408,9 @@ struct GalleryListView: View {
                 }
 
                 Button {
-                    if viewModel.isFavoritesMode {
-                        viewModel.showFavJumpDialog = true
-                    } else {
-                        viewModel.showGoToDialog = true
-                    }
+                    viewModel.showJumpDialog = true
                 } label: {
-                    Image(systemName: "arrow.up.and.down.text.horizontal")
+                    Image(systemName: "calendar")
                 }
                 .disabled(viewModel.galleries.isEmpty)
             }
@@ -501,44 +447,46 @@ struct GalleryListView: View {
         }
     }
 
-    // MARK: - 收藏跳页 Sheet (对齐 Android: GoToDialog 日期模式)
+    // MARK: - 跳页 Sheet (对齐 Android GoToDialog: 日期选择器)
 
-    private var favoritesJumpSheet: some View {
+    private var jumpSheet: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                Text("选择日期跳转到对应时间的收藏")
+                Text("选择日期跳转到对应时间的画廊")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
 
                 DatePicker(
                     "跳转日期",
-                    selection: $viewModel.favJumpDate,
+                    selection: $viewModel.jumpDate,
                     in: ...Date(),
                     displayedComponents: .date
                 )
                 .datePickerStyle(.graphical)
                 .padding(.horizontal)
 
-                // 前/后页快捷按钮
-                HStack(spacing: 16) {
-                    if let prevHref = viewModel.prevHref {
-                        Button {
-                            viewModel.showFavJumpDialog = false
-                            viewModel.goToFavoritesHref(prevHref, mode: effectiveMode)
-                        } label: {
-                            Label("上一页", systemImage: "chevron.left")
+                // 前/后页快捷按钮 (仅收藏模式)
+                if viewModel.isFavoritesMode {
+                    HStack(spacing: 16) {
+                        if let prevHref = viewModel.prevHref {
+                            Button {
+                                viewModel.showJumpDialog = false
+                                viewModel.goToFavoritesHref(prevHref, mode: effectiveMode)
+                            } label: {
+                                Label("上一页", systemImage: "chevron.left")
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
-                    }
-                    if let nextHref = viewModel.nextHref {
-                        Button {
-                            viewModel.showFavJumpDialog = false
-                            viewModel.goToFavoritesHref(nextHref, mode: effectiveMode)
-                        } label: {
-                            Label("下一页", systemImage: "chevron.right")
+                        if let nextHref = viewModel.nextHref {
+                            Button {
+                                viewModel.showJumpDialog = false
+                                viewModel.goToFavoritesHref(nextHref, mode: effectiveMode)
+                            } label: {
+                                Label("下一页", systemImage: "chevron.right")
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
                     }
                 }
 
@@ -550,12 +498,12 @@ struct GalleryListView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { viewModel.showFavJumpDialog = false }
+                    Button("取消") { viewModel.showJumpDialog = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("跳转") {
-                        viewModel.showFavJumpDialog = false
-                        viewModel.goToFavoritesDate(viewModel.favJumpDate, mode: effectiveMode)
+                        viewModel.showJumpDialog = false
+                        viewModel.goToDate(viewModel.jumpDate, mode: effectiveMode)
                     }
                 }
             }
@@ -782,10 +730,10 @@ class GalleryListViewModel {
     var searchText = ""
     var hasMore = false
     var totalPages = 0 // 总页数 (对齐 Android mHelper.mPages)
-    var showGoToDialog = false // 跳页对话框
+    var showGoToDialog = false // 跳页对话框 (页码模式，仅 TopList 使用)
     var goToPageInput: String = "" // 跳页输入
-    var showFavJumpDialog = false // 收藏跳页对话框 (日期模式)
-    var favJumpDate = Date() // 收藏跳页日期
+    var showJumpDialog = false // 跳页对话框 (日期模式，对齐 Android GoToDialog)
+    var jumpDate = Date() // 跳页日期
 
     /// 收藏夹分页导航链接 (searchnav 模式: prev/next)
     var prevHref: String?
@@ -1109,7 +1057,7 @@ class GalleryListViewModel {
         await fetchPage(mode: mode, page: currentPage)
     }
     
-    /// 跳转到指定页 (对齐 Android ContentHelper.goTo(page))
+    /// 跳转到指定页 (对齐 Android ContentHelper.goTo(page), 仅 TopList 使用)
     func goToPage(_ page: Int, mode: GalleryListView.ListMode) {
         guard page >= 0 && page < totalPages else { return }
         
@@ -1121,6 +1069,30 @@ class GalleryListViewModel {
         
         Task {
             await fetchPage(mode: mode, page: page)
+        }
+    }
+
+    /// 通用日期跳转 (对齐 Android GoToDialog: 所有模式统一使用日期选择器)
+    func goToDate(_ date: Date, mode: GalleryListView.ListMode) {
+        if case .favorites(let slot) = mode {
+            // 收藏模式: ?seek=YYYY-MM-DD
+            goToFavoritesDate(date, mode: mode)
+        } else {
+            // 普通模式: ?next=UNIX_TIMESTAMP (对齐 Android: 日期转时间戳跳转)
+            goToNormalDate(date, mode: mode)
+        }
+    }
+
+    /// 普通画廊按日期跳转 (对齐 Android GoToDialog 普通模式: ?next=TIMESTAMP)
+    private func goToNormalDate(_ date: Date, mode: GalleryListView.ListMode) {
+        galleries = []
+        isLoading = true
+        errorMessage = nil
+        currentPage = 0
+        currentMode = mode
+        
+        Task {
+            await fetchNormalSeek(date: date, mode: mode)
         }
     }
 
@@ -1162,6 +1134,59 @@ class GalleryListViewModel {
                     self.errorMessage = EhError.localizedMessage(for: error)
                     self.isLoading = false
                 }
+            }
+        }
+    }
+
+    /// 普通画廊按日期跳转 (对齐 Android: ?next=UNIX_TIMESTAMP)
+    private func fetchNormalSeek(date: Date, mode: GalleryListView.ListMode) async {
+        let site = AppSettings.shared.gallerySite
+        let timestamp = Int(date.timeIntervalSince1970)
+
+        // 基于当前模式构建 URL，附加 &next=TIMESTAMP
+        var baseUrl: String
+        switch mode {
+        case .home:
+            var builder = ListUrlBuilder()
+            builder.mode = .normal
+            builder.category = currentCategory
+            baseUrl = builder.build(site: site)
+        case .search(let keyword):
+            var builder = ListUrlBuilder()
+            builder.mode = ListUrlBuilder.Mode(rawValue: currentSearchMode.listMode) ?? .normal
+            builder.keyword = keyword
+            builder.advanceSearch = currentAdvanceSearch
+            builder.minRating = currentMinRating
+            builder.pageFrom = currentPageFrom
+            builder.pageTo = currentPageTo
+            builder.category = currentCategory
+            baseUrl = builder.build(site: site)
+        case .tag(let keyword):
+            let encoded = keyword.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? keyword
+            baseUrl = "\(EhURL.host(for: site))tag/\(encoded)"
+        default:
+            // popular 等模式不支持日期跳转
+            return
+        }
+
+        // 附加 next=TIMESTAMP 参数
+        let separator = baseUrl.contains("?") ? "&" : "?"
+        let seekUrl = "\(baseUrl)\(separator)next=\(timestamp)"
+
+        do {
+            let result = try await EhAPI.shared.getGalleryList(url: seekUrl)
+            await MainActor.run {
+                self.galleries = result.galleries
+                self.hasMore = result.nextPage != nil || result.nextHref != nil
+                self.prevHref = result.prevHref
+                self.nextHref = result.nextHref
+                self.totalPages = result.pages
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = EhError.localizedMessage(for: error)
+                self.isLoading = false
             }
         }
     }
