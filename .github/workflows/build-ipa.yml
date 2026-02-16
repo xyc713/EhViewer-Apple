@@ -1,64 +1,21 @@
 name: Build IPA
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
+on: workflow_dispatch
 jobs:
   build:
     runs-on: macos-14
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Show environment info
-      run: |
-        pwd
-        ls -la
-        echo "---"
-        ls -la "ehviewer apple" 2>/dev/null || echo "ehviewer apple dir not found"
-        echo "---"
-        xcodebuild -version
-        swift --version
-        
-    - name: Resolve Swift Packages
-      run: |
-        ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj in root"
-        ls -la "ehviewer apple"/*.xcodeproj 2>/dev/null || echo "No xcodeproj in subdir"
-        xcodebuild -resolvePackageDependencies -project "ehviewer apple.xcodeproj"
-        
-    - name: Build Release
-      run: |
-        xcodebuild \
-          -project "ehviewer apple.xcodeproj" \
-          -scheme "ehviewer apple" \
-          -configuration Release \
-          -sdk iphoneos \
-          -destination "generic/platform=iOS" \
-          -derivedDataPath build \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          ONLY_ACTIVE_ARCH=NO \
-          ARCHS="arm64" \
-          build
-          
-    - name: Create IPA
-      run: |
-        cd build/Build/Products/Release-iphoneos
-        mkdir -p Payload
-        cp -r "ehviewer apple.app" Payload/
-        zip -r ../../../EhViewer-Apple.ipa Payload
-        cd ../../..
-        ls -lh EhViewer-Apple.ipa
-        
-    - name: Upload IPA
-      uses: actions/upload-artifact@v4
-      with:
-        name: EhViewer-Apple-IPA
-        path: EhViewer-Apple.ipa
-        retention-days: 30
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build IPA
+        run: |
+          cd "ehviewer apple"
+          xcodebuild -project "ehviewer apple.xcodeproj" -scheme "ehviewer apple" -configuration Release -sdk iphoneos -derivedDataPath ../build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          cd ../build/Build/Products/Release-iphoneos
+          mkdir -p Payload
+          cp -r "ehviewer apple.app" Payload/
+          zip -r ../../../EhViewer-Apple.ipa Payload
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: EhViewer-Apple-IPA
+          path: EhViewer-Apple.ipa
