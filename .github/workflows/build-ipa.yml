@@ -15,8 +15,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-
-        
     - name: Show environment info
       run: |
         xcodebuild -version
